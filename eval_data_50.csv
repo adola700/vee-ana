@@ -1,0 +1,51 @@
+ID,Category,Sentence
+1,Short,Hello, aap kaise hain?
+2,Short,Kya plan hai for today?
+3,Short,Main abhi busy hoon, call you later.
+4,Short,Meeting start ho gayi hai.
+5,Short,Weather kaisa hai in Mumbai?
+6,Short,Please window close kar do.
+7,Short,Mujhe ek coffee chahiye.
+8,Short,Battery low ho gayi hai, charge pe lagao.
+9,Short,Flight timing kya hai?
+10,Short,Please switch off the lights.
+11,Short,Rasta bahut lamba hai.
+12,Short,Order kab deliver hoga?
+13,Short,Chalo, let's go for a walk.
+14,Short,Password kya hai WiFi ka?
+15,Short,Gaadi park kar do.
+16,Short,Lunch ready hai kya?
+17,Short,Next station kaunsa hai?
+18,Short,Phone pick karo please.
+19,Short,Mujhe late ho raha hai for office.
+20,Short,See you in the evening.
+21,Medium,Aaj ka weather forecast keh raha hai ki heavy rain ho sakti hai.
+22,Medium,Main kal office nahi aa paunga kyunki meri health sahi nahi hai.
+23,Medium,Kya aap mujhe nearest metro station ka rasta bata sakte hain?
+24,Medium,Project ki deadline extend ho gayi hai, toh tension mat lo.
+25,Medium,Online shopping karte waqt hamesha reviews check karne chahiye.
+26,Medium,Mummy ne kaha ki bazaar se fresh vegetables le aana.
+27,Medium,Laptop switch on nahi ho raha, shayad charging problem hai.
+28,Medium,Humein kal subah jaldi nikalna padega to avoid heavy traffic.
+29,Medium,Netflix par naya show aaya hai, weekend par dekhenge.
+30,Medium,Gym join karne ka socha hai to stay fit and healthy.
+31,Medium,Is application ko download karke apna profile update kar lo.
+32,Medium,Traffic signals hamesha follow karne chahiye for safety.
+33,Medium,Aapka courier deliver ho chuka hai, please confirm kar dijiye.
+34,Medium,Mere pass extra ticket hai, kya tum mere saath chaloge?
+35,Medium,Recipe bahut simple hai, bas saare ingredients mix kar do.
+36,Medium,Payment fail ho gayi hai, dobara try karke dekhte hain.
+37,Medium,Video call par baat karte hain taaki clear communication ho.
+38,Medium,Bachpan ki yaadein hamesha special hoti hain, don't you think?
+39,Medium,Customer support ko call karke apni complaint register karwao.
+40,Medium,Train platform number four par aane wali hai, jaldi chalo.
+41,Edge Case,Bhai, jaldi aao, movie miss ho jayegi because of this traffic!
+42,Edge Case,Party mein black shirt pehenu ya blue, which one looks better?
+43,Edge Case,Doctor ne kaha hai ki junk food avoid karo for at least a week.
+44,Edge Case,Woh shopkeeper discount nahi de raha tha even after so much bargaining.
+45,Edge Case,Vacation ke photos upload kar diye hain, check karke like kar dena.
+46,Edge Case,Kal school ki chutti hai because it is a public holiday.
+47,Edge Case,Gas cylinder refill karwana hai, agency ka number mil sakta hai?
+48,Edge Case,Society ki meeting hai evening mein to discuss the security issues.
+49,Edge Case,Bachon ko park le jao, they have been watching TV all day.
+50,Edge Case,Dinner pe kya khana hai, should we order pizza or cook something healthy?

@@ -1,0 +1,26 @@
+ID,Category,Sentence
+1,Short,Hello aap kaise hain?
+3,Short,Main abhi busy hoon call you later.
+5,Short,Weather kaisa hai in Mumbai?
+7,Short,Mujhe ek coffee chahiye.
+9,Short,Flight timing kya hai?
+11,Short,Rasta bahut lamba hai.
+13,Short,Chalo let's go for a walk.
+15,Short,Gaadi park kar do.
+17,Short,Next station kaunsa hai?
+19,Short,Mujhe late ho raha hai for office.
+21,Medium,Aaj ka weather forecast keh raha hai ki heavy rain ho sakti hai.
+23,Medium,Kya aap mujhe nearest metro station ka rasta bata sakte hain?
+25,Medium,Online shopping karte waqt hamesha reviews check karne chahiye.
+27,Medium,Laptop switch on nahi ho raha shayad charging problem hai.
+29,Medium,Netflix par naya show aaya hai weekend par dekhenge.
+31,Medium,Is application ko download karke apna profile update kar lo.
+33,Medium,Aapka courier deliver ho chuka hai please confirm kar dijiye.
+35,Medium,Recipe bahut simple hai bas saare ingredients mix kar do.
+37,Medium,Video call par baat karte hain taaki clear communication ho.
+39,Medium,Customer support ko call karke apni complaint register karwao.
+41,Edge Case,Bhai jaldi aao movie miss ho jayegi because of this traffic!
+43,Edge Case,Doctor ne kaha hai ki junk food avoid karo for at least a week.
+45,Edge Case,Vacation ke photos upload kar diye hain check karke like kar dena.
+47,Edge Case,Gas cylinder refill karwana hai agency ka number mil sakta hai?
+49,Edge Case,Bachon ko park le jao they have been watching TV all day.
