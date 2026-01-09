@@ -1,0 +1,8 @@
+.venv
+venv
+.venv-backups
+.hf_home
+__pycache__
+*.pyc
+.ipynb_checkpoints
+.DS_Store
