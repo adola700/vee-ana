@@ -270,7 +270,7 @@ async def lifespan(app: FastAPI):
     from transformers import AutoTokenizer
     
     # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     
     # Create engine args for async engine
     engine_args = AsyncEngineArgs(
