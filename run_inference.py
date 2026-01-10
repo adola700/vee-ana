@@ -5,9 +5,10 @@ import soundfile as sf
 import csv
 import os
 import tqdm
+import argparse
 
 # --- Configuration ---
-OUTPUT_DIR = "generated_audio"
+OUTPUT_DIR = "generated_audio_old"
 CSV_FILE = "eval_data_25.csv"
 
 # Control token IDs (fixed for Veena)
@@ -106,8 +107,8 @@ def generate_speech(text, model, tokenizer, snac_model, speaker="kavya", tempera
     audio = decode_snac_tokens(snac_tokens, snac_model)
     return audio
 
-def main():
-    print("Loading models...")
+def main(model_name="maya-research/veena-tts"):
+    print(f"Loading models from: {model_name}")
     # SNAC
     snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval().cuda()
 
@@ -120,12 +121,12 @@ def main():
     )
 
     model = AutoModelForCausalLM.from_pretrained(
-        "maya-research/veena-tts",
+        model_name,
         quantization_config=quantization_config,
         device_map="auto",
         trust_remote_code=True,
     )
-    tokenizer = AutoTokenizer.from_pretrained("maya-research/veena-tts", trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     
     # Create output directory
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -167,4 +168,13 @@ def main():
     print("Done!")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run TTS inference with Veena model")
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="maya-research/veena-tts",
+        help="HuggingFace model name for the TTS model"
+    )
+    args = parser.parse_args()
+    main(model_name=args.model_name)
+
