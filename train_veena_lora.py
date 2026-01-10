@@ -2,11 +2,14 @@
 
 # pip install transformers==4.45 accelerate hf_transfer datasets pandas peft
 # pip install flash-attn --no-build-isolation
+# pip install snac torchaudio
 
 import os
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
 import torch
+import torchaudio
+import numpy as np
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
@@ -16,14 +19,16 @@ from transformers import (
 )
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
+from snac import SNAC
+from encode_audio import encode_audio_to_snac_tokens
 
 ################ Configuration ################
 MODEL_ID = "maya-research/veena-tts"
-DATASET_ID = "SPRINGLab/IndicTTS-Hindi"
-SPEAKER = "indictts"
+DATASET_ID = "akh99/hinglish-tts-openai"  # Hinglish TTS OpenAI dataset (24kHz)
+SPEAKER = "mixed_hinglish_Speaker"  # Speaker name for this dataset
 LR = 2e-5
-OUTPUT_DIR = "./veena_lora_fft"
-MAX_SAMPLES = 10000  # Set to None for full dataset
+OUTPUT_DIR = "./veena_lora_hinglish"
+MAX_SAMPLES = None  # Set to None for full dataset (this dataset is smaller)
 
 # Control token IDs (fixed for Veena)
 START_OF_SPEECH_TOKEN = 128257
@@ -51,6 +56,14 @@ model = AutoModelForCausalLM.from_pretrained(
 if tokenizer.pad_token is None:
     print("Fixing pad token...")
     tokenizer.pad_token = tokenizer.eos_token
+
+################ Load SNAC Model for Audio Tokenization ################
+print("Loading SNAC model for audio tokenization...")
+snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval().cuda()
+
+# Create resampler for 48kHz -> 24kHz conversion (needed for indictts-hinglish)
+# Note: hinglish-tts-openai is already at 24kHz, so no resampling needed
+resampler_48k = torchaudio.transforms.Resample(48000, 24000)
 
 ################ LoRA Configuration ################
 print("Configuring LoRA...")
@@ -121,14 +134,51 @@ def preprocess_function(example):
     """
     Preprocess a single example for Veena TTS training.
     
-    For TTS, the model learns to generate audio tokens from text input.
+    Converts audio to SNAC tokens and creates the training sequence:
     Input format: [HUMAN] <spk_speaker> text [/HUMAN] [AI] [SPEECH] audio_tokens [/SPEECH] [/AI]
     """
-    text = example["text"]
+    import io
+    import soundfile as sf
     
-    # Note: For actual TTS training, you need audio tokens from the SNAC encoder.
-    # This template shows the text preprocessing part.
-    # You'll need to add audio tokenization based on your audio data.
+    # Get text - dataset uses 'hinglish' column
+    text = example.get("hinglish", example.get("text", ""))
+    
+    # Get audio data
+    audio_data = example["audio"]
+    
+    # Handle different audio formats from HuggingFace datasets
+    if isinstance(audio_data, dict):
+        if "array" in audio_data:
+            # Audio is already decoded
+            audio_array = audio_data["array"]
+            sample_rate = audio_data["sampling_rate"]
+            audio_tensor = torch.tensor(audio_array, dtype=torch.float32)
+        elif "bytes" in audio_data:
+            # Audio is in bytes format - decode it
+            audio_bytes = audio_data["bytes"]
+            with io.BytesIO(audio_bytes) as f:
+                audio_array, sample_rate = sf.read(f)
+            audio_tensor = torch.tensor(audio_array, dtype=torch.float32)
+        else:
+            raise ValueError(f"Unknown audio format: {audio_data.keys()}")
+    else:
+        raise ValueError(f"Unexpected audio data type: {type(audio_data)}")
+    
+    # Resample to 24kHz if needed (SNAC uses 24kHz)
+    if sample_rate != 24000:
+        if sample_rate == 48000:
+            audio_tensor = resampler_48k(audio_tensor.unsqueeze(0)).squeeze(0)
+        else:
+            resampler = torchaudio.transforms.Resample(sample_rate, 24000)
+            audio_tensor = resampler(audio_tensor.unsqueeze(0)).squeeze(0)
+    
+    # Encode audio to SNAC tokens
+    try:
+        snac_tokens = encode_audio_to_snac_tokens(audio_tensor.numpy(), snac_model)
+    except Exception as e:
+        print(f"Warning: Failed to encode audio: {e}")
+        # Return None to skip this example
+        return None
     
     # Create the prompt with speaker token
     prompt = f"<spk_{SPEAKER}> {text}"
@@ -143,76 +193,16 @@ def preprocess_function(example):
         START_OF_SPEECH_TOKEN,
     ]
     
-    # For demonstration: we'd typically add audio tokens here from SNAC encoding
-    # audio_tokens = encode_audio_with_snac(example["audio"])  # You'd implement this
-    # full_sequence = input_tokens + audio_tokens + [END_OF_SPEECH_TOKEN, END_OF_AI_TOKEN]
+    # Full sequence with audio tokens
+    full_sequence = input_tokens + snac_tokens + [END_OF_SPEECH_TOKEN, END_OF_AI_TOKEN]
     
-    # For now, this creates a placeholder that you'll need to extend
-    # with actual audio tokenization
-    full_sequence = input_tokens + [END_OF_SPEECH_TOKEN, END_OF_AI_TOKEN]
-    
-    # Labels: mask the input prompt, only train on audio tokens
-    labels = [-100] * len(input_tokens) + [END_OF_SPEECH_TOKEN, END_OF_AI_TOKEN]
+    # Labels: mask the input prompt (-100), train on audio tokens + end tokens
+    labels = [-100] * len(input_tokens) + snac_tokens + [END_OF_SPEECH_TOKEN, END_OF_AI_TOKEN]
     
     attention_mask = [1] * len(full_sequence)
     
-    return {
-        "input_ids": full_sequence,
-        "attention_mask": attention_mask,
-        "labels": labels,
-    }
-
-
-def preprocess_with_audio(example):
-    """
-    Full preprocessing function that includes audio tokenization.
-    Requires SNAC model to be loaded for audio encoding.
-    
-    This function should be used when you have audio data available.
-    """
-    from snac import SNAC
-    import numpy as np
-    
-    text = example["text"]
-    audio_array = example["audio"]["array"]
-    sample_rate = example["audio"]["sampling_rate"]
-    
-    # Load SNAC model (do this once globally in practice)
-    # snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval().cuda()
-    
-    # Resample if needed (SNAC uses 24kHz)
-    # if sample_rate != 24000:
-    #     audio_array = resample_audio(audio_array, sample_rate, 24000)
-    
-    # Encode audio to SNAC tokens
-    # snac_tokens = encode_with_snac(snac_model, audio_array)
-    
-    # Create the prompt with speaker token
-    prompt = f"<spk_{SPEAKER}> {text}"
-    prompt_tokens = tokenizer.encode(prompt, add_special_tokens=False)
-    
-    # Construct full sequence
-    input_tokens = [
-        START_OF_HUMAN_TOKEN,
-        *prompt_tokens,
-        END_OF_HUMAN_TOKEN,
-        START_OF_AI_TOKEN,
-        START_OF_SPEECH_TOKEN,
-    ]
-    
-    # Add audio tokens (placeholder - implement SNAC encoding)
-    # audio_token_ids = [AUDIO_CODE_BASE_OFFSET + t for t in snac_tokens]
-    audio_token_ids = []  # Replace with actual SNAC-encoded tokens
-    
-    full_sequence = input_tokens + audio_token_ids + [END_OF_SPEECH_TOKEN, END_OF_AI_TOKEN]
-    
-    # Labels: mask the input, train on audio + end tokens
-    labels = [-100] * len(input_tokens) + audio_token_ids + [END_OF_SPEECH_TOKEN, END_OF_AI_TOKEN]
-    
-    attention_mask = [1] * len(full_sequence)
-    
-    # Truncate if too long
-    max_length = 20512
+    # Truncate if too long (max context length)
+    max_length = 8192
     if len(full_sequence) > max_length:
         full_sequence = full_sequence[:max_length]
         attention_mask = attention_mask[:max_length]
@@ -228,8 +218,9 @@ def preprocess_with_audio(example):
 ################ Prepare Dataset ################
 print("Preparing dataset with streaming...")
 
-# Map the preprocessing function
-tokenized_dataset = ds.map(preprocess_function, remove_columns=["audio", "text"])
+# Map the preprocessing function - filter out None results
+# Note: akh99/hinglish-tts-openai has columns: audio, hinglish
+tokenized_dataset = ds.map(preprocess_function, remove_columns=["audio", "hinglish"])
 
 ################ Training Arguments ################
 training_args = TrainingArguments(

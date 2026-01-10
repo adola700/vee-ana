@@ -6,17 +6,42 @@ from IPython.display import Audio
 
 load_dotenv()
 
-def generate_openai_speech(text, model="gpt-4o-mini-tts", voice="alloy", output_file="openai_speech.mp3"):
+INSTRUCTIONS = """Speak in Indian English accent. 
+Manage prosody naturally with appropriate pauses, intonation, and rhythm. 
+For Hinglish text (mixed Hindi-English), pronounce Hindi words authentically while maintaining natural flow. 
+Use natural speech patterns with proper emphasis and pacing."""
+
+def generate_openai_speech_hd(text, voice="alloy", output_file="openai_speech.mp3"):
     """
-    Generates speech using OpenAI API and returns an IPython Audio object for playback.
+    Generates speech using OpenAI TTS-1-HD model (no instructions).
+    Returns an IPython Audio object for playback.
     """
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     output_path = Path(output_file)
     
     with client.audio.speech.with_streaming_response.create(
-        model=model,
+        model="tts-1-hd",
         voice=voice,
-        input=text
+        input=text,
+        instructions=INSTRUCTIONS,
+    ) as response:
+        response.stream_to_file(output_path)
+        
+    return Audio(output_file)
+
+def generate_openai_speech_mini(text, voice="alloy", output_file="openai_speech.mp3"):
+    """
+    Generates speech using OpenAI GPT-4o-mini-TTS model with instructions.
+    Returns an IPython Audio object for playback.
+    """
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    output_path = Path(output_file)
+    
+    with client.audio.speech.with_streaming_response.create(
+        model="gpt-4o-mini-tts",
+        voice=voice,
+        input=text,
+        instructions=INSTRUCTIONS
     ) as response:
         response.stream_to_file(output_path)
         
