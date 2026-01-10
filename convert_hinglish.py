@@ -114,7 +114,7 @@ def main():
         for hindi in all_data:
             f.write(all_data[hindi] + "\n")
             
-    print(f"✅ Conversion completed. Processed {len(all_data)} items.")
+    print(f"Conversion completed. Processed {len(all_data)} items.")
     print(f"Outputs saved to hinglish_texts.json (dict) and hinglish_texts.txt (values)")
 
 if __name__ == "__main__":

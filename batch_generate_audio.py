@@ -246,7 +246,7 @@ def batch_generate_audio(input_path, text_column="text", max_samples=None,
     
     # Count successes
     successful = sum(1 for r in all_results if r["success"])
-    print(f"✅ Audio generation completed!")
+    print(f"Audio generation completed!")
     print(f"   Successfully generated: {successful}/{len(all_results)} files")
     print(f"   Output directory: {OUTPUT_DIR}")
     print(f"   Manifest saved to: {manifest_path}")

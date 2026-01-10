@@ -174,7 +174,7 @@ def main():
     successful = sum(1 for r in all_results if r["success"])
     failed = len(all_results) - successful
     
-    print(f"\n✅ Audio generation completed!")
+    print(f"\nAudio generation completed!")
     print(f"   Total processed: {len(all_results)}")
     print(f"   Successful: {successful}")
     print(f"   Failed: {failed}")

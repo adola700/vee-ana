@@ -168,7 +168,7 @@ vee-ana/
 
 ---
 
-## 📊 Evaluation
+## Evaluation
 
 The evaluation CSVs contain Hinglish sentences across categories:
 - Hindi-dominant

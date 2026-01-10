@@ -36,7 +36,7 @@ def merge_batches(output_dir="temp_outputs", final_json="hinglish_texts.json", f
         for hindi in all_data:
             f.write(all_data[hindi] + "\n")
             
-    print(f"✅ Merge completed.")
+    print(f"Merge completed.")
 
 if __name__ == "__main__":
     merge_batches()
