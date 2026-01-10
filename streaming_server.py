@@ -1,411 +1,183 @@
-"""
-FastAPI TTS Server with Real-time Streaming using vLLM
-Based on orpheus-streaming architecture
-- vLLM for fast token generation
-- WebSocket for real-time audio streaming
-- SNAC decoder for audio
-"""
-
 import os
 # Force vLLM v0 engine architecture
 os.environ["VLLM_USE_V1"] = "0"
 import time
 import logging
 import asyncio
-from typing import AsyncGenerator, List, Optional
-from contextlib import asynccontextmanager
-import queue
-from threading import Thread
-
+import json
+import uuid
 import torch
 import numpy as np
+from typing import AsyncGenerator, List
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse
-from starlette.websockets import WebSocketState
 from pydantic import BaseModel
 from snac import SNAC
+from transformers import AutoTokenizer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Control token IDs
-START_OF_SPEECH_TOKEN = 128257
-END_OF_SPEECH_TOKEN = 128258
+# --- Configuration & Offsets ---
+AUDIO_CODE_BASE_OFFSET = 128266  
+MIN_FRAMES_FIRST = 7   
+MIN_FRAMES_SUBSEQ = 28 
+PROCESS_EVERY = 7      
+DEFAULT_SPEAKER = "kavya"
+
+# Special Control Tokens
 START_OF_HUMAN_TOKEN = 128259
 END_OF_HUMAN_TOKEN = 128260
 START_OF_AI_TOKEN = 128261
+START_OF_SPEECH_TOKEN = 128257
+END_OF_SPEECH_TOKEN = 128258
 END_OF_AI_TOKEN = 128262
-AUDIO_CODE_BASE_OFFSET = 128266
-
-# Load decoder configuration from environment variables
-CUSTOM_TOKEN_PREFIX = "<custom_token_"
-CUSTOM_TOKEN_SUFFIX = ">"
-MIN_FRAMES_FIRST = int(os.environ.get("MIN_FRAMES_FIRST", 7))
-MIN_FRAMES_SUBSEQ = int(os.environ.get("MIN_FRAMES_SUBSEQ", 28))
-PROCESS_EVERY = int(os.environ.get("PROCESS_EVERY", 28))
-
-# Default speaker
-DEFAULT_SPEAKER = "kavya"
 
 # Globals
-llm = None  # vLLM engine
-sampling_params = None
-snac_model = None
-snac_device = None
+llm = None
 tokenizer = None
-
+snac_model = None
+snac_device = "cuda" if torch.cuda.is_available() else "cpu"
 
 class TTSRequest(BaseModel):
     text: str
     temperature: float = 0.4
     top_p: float = 0.9
 
+# --- Core Logic Functions ---
 
-def turn_token_into_id(token_sim, index: int):
-    """Convert token to audio code following orpheus pattern."""
+def turn_token_into_id(token_id: int, index: int):
     mod = index % 7
-    
-    # Handle direct numeric IDs from vLLM
-    if isinstance(token_sim, int):
-        expected_offset = AUDIO_CODE_BASE_OFFSET + (mod * 4096)
-        if AUDIO_CODE_BASE_OFFSET <= token_sim < (AUDIO_CODE_BASE_OFFSET + 7 * 4096):
-            audio_code = token_sim - expected_offset
-            return audio_code if 0 <= audio_code < 4096 else None
-        return None
-
-    # Handle string tokens (Orpheus style)
-    try:
-        token_string = str(token_sim).strip()
-        digits_str = token_string.removeprefix(CUSTOM_TOKEN_PREFIX).removesuffix(CUSTOM_TOKEN_SUFFIX)
-        # Assuming the standard Orpheus offset for strings is 10
-        audio_code = int(digits_str) - 10 - (mod * 4096)
-        return audio_code if 0 <= audio_code < 4096 else None
-    except (ValueError, TypeError):
-        return None
-
+    expected_offset = AUDIO_CODE_BASE_OFFSET + (mod * 4096)
+    audio_code = token_id - expected_offset
+    return audio_code if 0 <= audio_code < 4096 else None
 
 def convert_to_audio(multiframe: List[int], is_first_chunk: bool = False) -> bytes:
-    """
-    Highly optimized version of convert_to_audio from Orpheus.
-    """
-    if len(multiframe) < 7:
-        return None
-    
     num_frames = len(multiframe) // 7
-    
-    # Pre-allocate tensors directly on target device
+    if num_frames == 0: return None
+
     codes_0 = torch.empty((1, num_frames), dtype=torch.int32, device=snac_device)
     codes_1 = torch.empty((1, num_frames * 2), dtype=torch.int32, device=snac_device)
     codes_2 = torch.empty((1, num_frames * 4), dtype=torch.int32, device=snac_device)
     
-    # Fill tensors with direct indexing
     for i in range(num_frames):
-        base_idx = i * 7
-        codes_0[0, i] = multiframe[base_idx]
-        codes_1[0, i*2] = multiframe[base_idx + 1]
-        codes_1[0, i*2 + 1] = multiframe[base_idx + 4]
-        codes_2[0, i*4] = multiframe[base_idx + 2]
-        codes_2[0, i*4 + 1] = multiframe[base_idx + 3]
-        codes_2[0, i*4 + 2] = multiframe[base_idx + 5]
-        codes_2[0, i*4 + 3] = multiframe[base_idx + 6]
-    
-    # Validation
-    if (torch.any(codes_0 < 0) or torch.any(codes_0 > 4096) or
-        torch.any(codes_1 < 0) or torch.any(codes_1 > 4096) or
-        torch.any(codes_2 < 0) or torch.any(codes_2 > 4096)):
-        return None
-    codes = [codes_0, codes_1, codes_2]
-    
+        b = i * 7
+        codes_0[0, i] = multiframe[b]
+        codes_1[0, i*2], codes_1[0, i*2 + 1] = multiframe[b+1], multiframe[b+4]
+        codes_2[0, i*4:i*4+4] = torch.tensor([multiframe[b+2], multiframe[b+3], multiframe[b+5], multiframe[b+6]], device=snac_device)
+
     with torch.inference_mode():
-        audio_hat = snac_model.decode(codes)
-        
-        # Slicing logic from Orpheus
+        audio_hat = snac_model.decode([codes_0, codes_1, codes_2])
         if is_first_chunk:
-            # For the very first chunk, we return everything we have to avoid empty slices
             audio_slice = audio_hat.squeeze()
         else:
-            # We process MIN_FRAMES_SUBSEQ (default 28 = 4 frames) or more.
-            # If we have exactly 28 tokens, we want frames [-4:] which are samples [-2048:]
-            num_samples = num_frames * 512
-            # If the user provides 8 frames (56 tokens), the slice 2048:4096 
-            # effectively returns the last 4 frames. 
-            # We'll use your exact 2048:4096 logic if we have 8+ frames.
-            if num_samples >= 4096:
-                audio_slice = audio_hat[:, :, 2048:4096].squeeze()
-            else:
-                audio_slice = audio_hat[:, :, -512:].squeeze()
-        
-        if snac_device == "cuda":
-            audio_int16 = (audio_slice * 32767.0).round().to(torch.int16)
-            return audio_int16.cpu().numpy().tobytes()
-        else:
-            audio_np = audio_slice.cpu().numpy()
-            return (audio_np * 32767.0).round().astype(np.int16).tobytes()
+            audio_slice = audio_hat[:, :, -512:].squeeze()
 
+        audio_int16 = (audio_slice * 32767.0).clamp(-32768, 32767).round().to(torch.int16)
+        return audio_int16.cpu().numpy().tobytes()
 
 async def generate_tokens_vllm(text: str, temperature: float, top_p: float):
-    """
-    Generate tokens using vLLM AsyncLLMEngine for TRUE streaming.
-    Yields tokens as they are generated, one by one.
-    """
-    global llm, tokenizer
     from vllm import SamplingParams
-    import uuid
-    
     prompt = f"<spk_{DEFAULT_SPEAKER}> {text}"
-    prompt_tokens = tokenizer.encode(prompt, add_special_tokens=False)
+    input_ids = [START_OF_HUMAN_TOKEN] + tokenizer.encode(prompt, add_special_tokens=False) + \
+                [END_OF_HUMAN_TOKEN, START_OF_AI_TOKEN, START_OF_SPEECH_TOKEN]
     
-    input_tokens = [
-        START_OF_HUMAN_TOKEN,
-        *prompt_tokens,
-        END_OF_HUMAN_TOKEN,
-        START_OF_AI_TOKEN,
-        START_OF_SPEECH_TOKEN
-    ]
-    
-    max_tokens = min(int(len(text) * 1.3) * 7 + 21, 700)
-    
-    # Create sampling params for this request
     params = SamplingParams(
-        temperature=temperature,
-        top_p=top_p,
-        max_tokens=max_tokens,
-        repetition_penalty=1.05,
+        temperature=temperature, top_p=top_p, 
+        max_tokens=700, repetition_penalty=1.05,
         stop_token_ids=[END_OF_SPEECH_TOKEN, END_OF_AI_TOKEN]
     )
     
-    # Format prompt text
-    prompt_text = tokenizer.decode(input_tokens)
     request_id = str(uuid.uuid4())
-    
-    # Track already yielded tokens
-    prev_token_count = 0
-    gen_start = time.perf_counter()
-    first_token_time = None
-    
-    # Use async generator from engine with prompt_token_ids directly
-    # This avoids any tokenizer.decode/encode issues with special tokens
-    async for request_output in llm.generate({"prompt_token_ids": input_tokens}, params, request_id=request_id):
-        # Get new tokens since last yield
-        token_ids = request_output.outputs[0].token_ids
-        new_tokens = token_ids[prev_token_count:]
-        
-        if first_token_time is None and len(new_tokens) > 0:
-            first_token_time = time.perf_counter()
-            logger.info(f"First token at: {(first_token_time - gen_start)*1000:.2f} ms, token_id: {new_tokens[0]}, batch size: {len(new_tokens)}")
-        
-        for token_id in new_tokens:
-            if prev_token_count < 10:
-                logger.info(f"Token {prev_token_count}: {token_id}")
-            yield token_id
-            prev_token_count += 1
-
+    prev_count = 0
+    async for output in llm.generate({"prompt_token_ids": input_ids}, params, request_id):
+        new_tokens = output.outputs[0].token_ids[prev_count:]
+        for t in new_tokens:
+            yield t
+            prev_count += 1
 
 async def tokens_decoder(token_gen) -> AsyncGenerator[bytes, None]:
-    """Decode tokens into audio chunks with reduced latency and Orpheus logic."""
-    buffer = []
-    count = 0
-    first_chunk_sent = False
-    decode_start = time.perf_counter()
-
-    async for token_sim in token_gen:
-        token = turn_token_into_id(token_sim, count)
-        if token is None or token < 0:
-            continue
-
-        buffer.append(token)
+    buffer, count, first_sent = [], 0, False
+    async for token_id in token_gen:
+        code = turn_token_into_id(token_id, count)
+        if code is None: continue
+        buffer.append(code)
         count += 1
 
-        if not first_chunk_sent and count >= MIN_FRAMES_FIRST:
-            snac_start = time.perf_counter()
-            audio = convert_to_audio(buffer[-MIN_FRAMES_FIRST:], is_first_chunk=True)
-            snac_time = (time.perf_counter() - snac_start) * 1000
-            if audio is not None:
-                first_chunk_sent = True
-                total_time = (time.perf_counter() - decode_start) * 1000
-                logger.info(f"First audio chunk: {count} tokens collected in {total_time:.2f}ms, SNAC decode: {snac_time:.2f}ms")
-                yield audio
-        elif first_chunk_sent and count % PROCESS_EVERY == 0:
-            # Use MIN_FRAMES_SUBSEQ (default 28 = 4 frames) or larger for overlap
-            # If subseq is 56, we process 8 frames for better quality
-            window = buffer[-MIN_FRAMES_SUBSEQ:] if len(buffer) >= MIN_FRAMES_SUBSEQ else buffer
+        if not first_sent and count >= MIN_FRAMES_FIRST:
+            audio = convert_to_audio(buffer, is_first_chunk=True)
+            if audio: first_sent = True; yield audio
+        elif first_sent and count % PROCESS_EVERY == 0:
+            window = buffer[-MIN_FRAMES_SUBSEQ:]
             audio = convert_to_audio(window, is_first_chunk=False)
-            if audio is not None:
-                yield audio
+            if audio: yield audio
 
+# --- Robust Lifespan & Warmup ---
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize models on startup."""
-    global llm, snac_model, snac_device, tokenizer
+    global llm, snac_model, tokenizer
+    model_path = os.environ.get("MODEL_NAME", "maya-research/veena-tts")
     
-    model_name = os.environ.get("MODEL_NAME", "maya-research/veena-tts")
-    
-    logger.info("Loading SNAC model...")
-    snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval()
-    snac_device = "cuda" if torch.cuda.is_available() else "cpu"
-    snac_model = snac_model.to(snac_device)
-    
-    # Compile SNAC model for speed
+    # 1. Load SNAC
+    logger.info("Loading SNAC...")
+    snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval().to(snac_device)
     if snac_device == "cuda":
-        try:
-            logger.info("Compiling SNAC model...")
-            snac_model.decode = torch.compile(snac_model.decode)
-        except Exception as e:
-            logger.warning(f"Failed to compile SNAC: {e}")
-            
-    if snac_device == "cuda":
-        torch.backends.cudnn.benchmark = True
-        dummy_codes = [
-            torch.randint(0, 4096, (1, 1), dtype=torch.int32, device=snac_device),
-            torch.randint(0, 4096, (1, 2), dtype=torch.int32, device=snac_device),
-            torch.randint(0, 4096, (1, 4), dtype=torch.int32, device=snac_device)
-        ]
-        with torch.inference_mode():
-            _ = snac_model.decode(dummy_codes)
-    
-    logger.info(f"Loading vLLM AsyncLLMEngine with model: {model_name}")
+        snac_model.decode = torch.compile(snac_model.decode)
+        logger.info("SNAC Compiled.")
+
+    # 2. Load vLLM
     from vllm import AsyncLLMEngine, AsyncEngineArgs
-    from transformers import AutoTokenizer
-    
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    
-    # Create engine args for async engine
-    engine_args = AsyncEngineArgs(
-        model=model_name,
-        trust_remote_code=True,
-        dtype="float16",
-        gpu_memory_utilization=0.5,
-        max_model_len=1024,
-        enforce_eager=True,
-    )
-    
-    # Load AsyncLLMEngine for true streaming
-    llm = AsyncLLMEngine.from_engine_args(engine_args)
-    
-    logger.info("Models loaded! Ready to serve.")
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    args = AsyncEngineArgs(model=model_path, trust_remote_code=True, dtype="float16", 
+                           gpu_memory_utilization=0.4, enforce_eager=True)
+    llm = AsyncLLMEngine.from_engine_args(args)
+
+    # 3. FULL PIPELINE WARMUP (The Fix)
+    # This runs a real text through the engine and decoder to force CUDA kernels to load
+    logger.info("WARMING UP ENGINE: Simulating first speech request...")
+    try:
+        warmup_text = "Checking system readiness."
+        token_gen = generate_tokens_vllm(warmup_text, 0.4, 0.9)
+        async for _ in tokens_decoder(token_gen):
+            pass 
+        
+        if snac_device == "cuda":
+            torch.cuda.synchronize()
+        logger.info("SYSTEM READY: All models primed.")
+    except Exception as e:
+        logger.error(f"Warmup failed: {e}")
+
     yield
-    logger.info("Shutting down...")
-    # Shutdown engine
     if hasattr(llm, "shutdown_background_loop"):
         llm.shutdown_background_loop()
-    elif hasattr(llm, "shutdown"):
-        llm.shutdown()
 
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-app = FastAPI(
-    title="TTS Streaming Server (vLLM)",
-    description="Real-time streaming TTS with vLLM acceleration",
-    lifespan=lifespan
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+# --- Endpoints ---
 
 @app.websocket("/v1/audio/speech/stream/ws")
 async def tts_websocket(websocket: WebSocket):
-    """WebSocket endpoint for real-time audio streaming."""
     await websocket.accept()
-    logger.info("WebSocket connection opened")
-    
     try:
         while True:
             data = await websocket.receive_json()
-            
-            if not data.get("continue", True):
-                break
-            
             text = data.get("text", "").strip()
-            if not text:
-                await websocket.send_json({"type": "error", "message": "Empty text"})
-                continue
+            if not text: continue
             
-            temperature = data.get("temperature", 0.4)
-            top_p = data.get("top_p", 0.9)
-            segment_id = data.get("segment_id", "default")
-            
-            start_time = time.perf_counter()
-            
-            try:
-                await websocket.send_json({"type": "start", "segment_id": segment_id})
-                
-                logger.info(f"Generating audio for: '{text[:50]}...'")
-                
-                token_gen = generate_tokens_vllm(text, temperature, top_p)
-                audio_gen = tokens_decoder(token_gen)
-                
-                chunk_count = 0
-                total_bytes = 0
-                async for chunk in audio_gen:
-                    chunk_count += 1
-                    total_bytes += len(chunk)
-                    elapsed = (time.perf_counter() - start_time) * 1000
-                    
-                    if chunk_count == 1:
-                        logger.info(f"TTFB: {elapsed:.2f} ms, first chunk size: {len(chunk)} bytes")
-                    elif chunk_count <= 3:
-                        logger.info(f"Chunk {chunk_count}: {elapsed:.2f} ms, size: {len(chunk)} bytes")
-                    
-                    await websocket.send_bytes(chunk)
-                
-                total_time = (time.perf_counter() - start_time) * 1000
-                logger.info(f"Generation complete: {chunk_count} chunks, {total_bytes} total bytes, {total_time:.2f} ms total")
-                
-                await websocket.send_json({"type": "end", "segment_id": segment_id})
-                
-            except Exception as e:
-                logger.exception(f"Error during generation: {e}")
-                await websocket.send_json({"type": "error", "message": str(e)})
-    
-    except WebSocketDisconnect:
-        logger.info("Client disconnected")
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-    finally:
-        if websocket.client_state == WebSocketState.CONNECTED:
-            await websocket.close()
-
-
-@app.post("/v1/audio/speech/stream")
-async def tts_stream(request: TTSRequest):
-    """HTTP streaming endpoint."""
-    
-    async def generate():
-        start_time = time.perf_counter()
-        first_chunk = True
-        
-        token_gen = generate_tokens_vllm(request.text, request.temperature, request.top_p)
-        audio_gen = tokens_decoder(token_gen)
-        
-        async for chunk in audio_gen:
-            if first_chunk:
-                ttfb = time.perf_counter() - start_time
-                logger.info(f"TTFB: {ttfb*1000:.2f} ms")
-                first_chunk = False
-            yield chunk
-    
-    return StreamingResponse(
-        generate(),
-        media_type="audio/pcm",
-        headers={
-            "X-Audio-Sample-Rate": "24000",
-            "X-Audio-Channels": "1",
-            "X-Audio-Format": "int16"
-        }
-    )
-
+            await websocket.send_json({"type": "start"})
+            token_gen = generate_tokens_vllm(text, data.get("temperature", 0.4), data.get("top_p", 0.9))
+            async for chunk in tokens_decoder(token_gen):
+                await websocket.send_bytes(chunk)
+            await websocket.send_json({"type": "end"})
+    except WebSocketDisconnect: logger.info("Client left")
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    """Serve the streaming TTS demo page."""
     return """
 <!DOCTYPE html>
 <html>
@@ -413,7 +185,7 @@ async def index():
     <title>TTS Streaming Demo (vLLM)</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
+        body {
             font-family: system-ui, -apple-system, sans-serif;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             min-height: 100vh;
@@ -496,7 +268,7 @@ async def index():
         
         <div class="input-group">
             <label for="textInput">Enter text and press Enter</label>
-            <input type="text" id="textInput" value="Hello! Aaj ka weather kaisa hai?" 
+            <input type="text" id="textInput" value="Hello! Aaj ka weather kaisa hai?"
                    placeholder="Type your text here...">
         </div>
         
@@ -559,47 +331,40 @@ async def index():
             
             initAudio();
             
-            let requestSentTime = 0;  // Time when we actually send the request
+            let requestSentTime = 0;  
             let firstChunkTime = 0;
             let totalSamples = 0;
-            let nextPlayTime = 0;  // For seamless audio scheduling
+            let nextPlayTime = 0;  
             
             try {
-                const ws = new WebSocket('ws://' + window.location.host + '/v1/audio/speech/stream/ws');
+                const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+                const ws = new WebSocket(protocol + window.location.host + '/v1/audio/speech/stream/ws');
                 
                 ws.onopen = () => {
                     setStatus('Generating...', 'generating');
-                    // Measure TTFB from when request is actually sent
                     requestSentTime = performance.now();
                     ws.send(JSON.stringify({ text: text, temperature: 0.4, top_p: 0.9 }));
                 };
                 
                 ws.onmessage = async (event) => {
                     if (event.data instanceof Blob) {
-                        // First chunk received - record TTFB
                         if (firstChunkTime === 0) {
                             firstChunkTime = performance.now();
                             const ttfb = Math.round(firstChunkTime - requestSentTime);
-                            console.log('First audio chunk received at:', ttfb, 'ms');
                             ttfbEl.textContent = ttfb;
                             stats.style.display = 'flex';
                             setStatus('Playing...', 'success');
-                            
-                            // Initialize playback time to NOW for immediate start
                             nextPlayTime = audioContext.currentTime;
                         }
                         
                         const arrayBuffer = await event.data.arrayBuffer();
                         const int16Array = new Int16Array(arrayBuffer);
-                        console.log('Audio chunk size:', int16Array.length, 'samples');
                         
-                        // Convert to float32 for Web Audio
                         const float32Array = new Float32Array(int16Array.length);
                         for (let i = 0; i < int16Array.length; i++) {
                             float32Array[i] = int16Array[i] / 32768.0;
                         }
                         
-                        // Create and play audio buffer IMMEDIATELY
                         const audioBuffer = audioContext.createBuffer(1, float32Array.length, 24000);
                         audioBuffer.getChannelData(0).set(float32Array);
                         
@@ -607,9 +372,7 @@ async def index():
                         source.buffer = audioBuffer;
                         source.connect(audioContext.destination);
                         
-                        // Play at the scheduled time (or now if behind)
                         const playTime = Math.max(nextPlayTime, audioContext.currentTime);
-                        console.log('Playing at:', playTime.toFixed(3), 'current:', audioContext.currentTime.toFixed(3));
                         source.start(playTime);
                         nextPlayTime = playTime + audioBuffer.duration;
                         
@@ -625,11 +388,6 @@ async def index():
                             ws.close();
                         }
                     }
-                };
-                
-                ws.onerror = (error) => {
-                    console.error('WebSocket error:', error);
-                    setStatus('Connection error', 'error');
                 };
                 
                 ws.onclose = () => {
@@ -660,12 +418,6 @@ async def index():
 </body>
 </html>
 """
-
-
-@app.get("/health")
-async def health():
-    return {"status": "healthy", "backend": "vllm", "model_loaded": llm is not None}
-
 
 if __name__ == "__main__":
     import uvicorn
