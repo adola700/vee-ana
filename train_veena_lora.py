@@ -47,7 +47,7 @@ print("Loading model...")
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID,
     torch_dtype=torch.bfloat16,
-    attn_implementation="flash_attention_2",
+    attn_implementation="sdpa",
     device_map="auto",
     trust_remote_code=True,
 )
@@ -116,18 +116,28 @@ lora_config = LoraConfig(
 )
 
 model = get_peft_model(model, lora_config)
-model.print_trainable_parameters()
+
+# Calculate and print trainable parameters percentage
+trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+total_params = sum(p.numel() for p in model.parameters())
+trainable_pct = 100 * trainable_params / total_params
+print(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({trainable_pct:.2f}%)")
 
 # Enable gradient checkpointing for memory efficiency
 model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentrant': False})
 
-################ Load Streaming Dataset ################
-print("Loading streaming dataset...")
-ds = load_dataset(DATASET_ID, split="train", streaming=True)
+################ Load Dataset (Full Download) ################
+# Create a processed dataset path based on dataset name
+PROCESSED_DATASET_DIR = f"./processed_{DATASET_ID.replace('/', '_')}"
 
-# Shuffle and take samples
+print(f"Loading dataset: {DATASET_ID}...")
+ds = load_dataset(DATASET_ID, split="train")
+print(f"Dataset loaded: {len(ds)} examples")
+
+# Shuffle if needed
 if MAX_SAMPLES is not None:
-    ds = ds.shuffle(seed=42, buffer_size=10000).take(MAX_SAMPLES)
+    ds = ds.shuffle(seed=42).select(range(min(MAX_SAMPLES, len(ds))))
+    print(f"Selected {len(ds)} samples")
 
 ################ Preprocessing Function ################
 def preprocess_function(example):
@@ -147,20 +157,27 @@ def preprocess_function(example):
     audio_data = example["audio"]
     
     # Handle different audio formats from HuggingFace datasets
-    if isinstance(audio_data, dict):
-        if "array" in audio_data:
-            # Audio is already decoded
+    # In some versions of datasets, this is an AudioDecoder object or dict-like
+    if hasattr(audio_data, "__getitem__") or "AudioDecoder" in str(type(audio_data)):
+        try:
+            # Try dictionary-style access (works for dict and some decoder objects)
             audio_array = audio_data["array"]
             sample_rate = audio_data["sampling_rate"]
             audio_tensor = torch.tensor(audio_array, dtype=torch.float32)
-        elif "bytes" in audio_data:
-            # Audio is in bytes format - decode it
-            audio_bytes = audio_data["bytes"]
-            with io.BytesIO(audio_bytes) as f:
-                audio_array, sample_rate = sf.read(f)
-            audio_tensor = torch.tensor(audio_array, dtype=torch.float32)
-        else:
-            raise ValueError(f"Unknown audio format: {audio_data.keys()}")
+        except (KeyError, TypeError):
+            # Fallback to attribute access if dictionary-style fails
+            audio_array = getattr(audio_data, "array", None)
+            sample_rate = getattr(audio_data, "sampling_rate", None)
+            if audio_array is not None and sample_rate is not None:
+                audio_tensor = torch.tensor(audio_array, dtype=torch.float32)
+            elif "bytes" in audio_data:
+                # Audio is in bytes format - decode it
+                audio_bytes = audio_data["bytes"]
+                with io.BytesIO(audio_bytes) as f:
+                    audio_array, sample_rate = sf.read(f)
+                audio_tensor = torch.tensor(audio_array, dtype=torch.float32)
+            else:
+                raise ValueError(f"Could not extract audio data from {type(audio_data)}")
     else:
         raise ValueError(f"Unexpected audio data type: {type(audio_data)}")
     
@@ -216,11 +233,34 @@ def preprocess_function(example):
 
 
 ################ Prepare Dataset ################
-print("Preparing dataset with streaming...")
+import os
 
-# Map the preprocessing function - filter out None results
-# Note: akh99/hinglish-tts-openai has columns: audio, hinglish
-tokenized_dataset = ds.map(preprocess_function, remove_columns=["audio", "hinglish"])
+if os.path.exists(PROCESSED_DATASET_DIR):
+    print(f"Loading processed dataset from {PROCESSED_DATASET_DIR}...")
+    from datasets import load_from_disk
+    tokenized_dataset = load_from_disk(PROCESSED_DATASET_DIR)
+    print(f"Loaded {len(tokenized_dataset)} processed examples")
+else:
+    print(f"Processing dataset ({len(ds)} examples)...")
+    
+    # Map the preprocessing function with progress bar
+    # Note: akh99/hinglish-tts-openai has columns: audio, hinglish
+    tokenized_dataset = ds.map(
+        preprocess_function,
+        remove_columns=ds.column_names,
+        desc="Encoding audio to SNAC tokens",
+        num_proc=1,  # Use single process for GPU-based SNAC encoding
+    )
+    
+    # Filter out None results (failed encodings)
+    original_len = len(tokenized_dataset)
+    tokenized_dataset = tokenized_dataset.filter(lambda x: x["input_ids"] is not None)
+    print(f"Filtered: {original_len} -> {len(tokenized_dataset)} examples")
+    
+    # Save processed dataset to disk
+    print(f"Saving processed dataset to {PROCESSED_DATASET_DIR}...")
+    tokenized_dataset.save_to_disk(PROCESSED_DATASET_DIR)
+    print("Dataset saved!")
 
 ################ Training Arguments ################
 training_args = TrainingArguments(
@@ -237,17 +277,17 @@ training_args = TrainingArguments(
     adam_epsilon=1e-5,
     # Batch configuration
     per_device_train_batch_size=8,  # Micro batch size
-    gradient_accumulation_steps=32,  # Effective batch size = 8 * 32 = 256 (single GPU)
-    num_train_epochs=1,
-    max_steps=1000,  # Use max_steps for streaming datasets
+    gradient_accumulation_steps=4,  # Effective batch size = 8 * 4 = 32
+    num_train_epochs=3,
     logging_dir="./logs",
     logging_steps=10,
     bf16=True,
     # LR scheduler
     warmup_ratio=0.02,
     lr_scheduler_type="cosine",
-    # Streaming dataset specific
-    dataloader_pin_memory=False,
+    # Dataset settings
+    dataloader_num_workers=4,
+    dataloader_pin_memory=True,
     remove_unused_columns=False,
 )
 
@@ -269,10 +309,10 @@ trainer = Trainer(
     ),
 )
 
-################ Print Model Info ################
-trainer.accelerator.print(f"Model: {trainer.model}")
-trainer.accelerator.print(f"Trainable parameters:")
-model.print_trainable_parameters()
+################ Print Training Info ################
+print(f"\nDataset size: {len(tokenized_dataset)} examples")
+print(f"Training epochs: {training_args.num_train_epochs}")
+print(f"Batch size: {training_args.per_device_train_batch_size} x {training_args.gradient_accumulation_steps} = {training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps}")
 
 ################ Start Training ################
 print("Starting training...")
