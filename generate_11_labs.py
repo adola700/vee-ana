@@ -27,7 +27,7 @@ import time
 # CONFIGURATION - Modify these as needed
 # ============================================================================
 
-API_KEY = "sk_fd314ccaab680e5b8d3efedef406fb91a827cd7c49f99e88"
+API_KEY = "<API_KEY>"
 BASE_URL = "https://api.elevenlabs.io/v1"
 
 # Model options (all support Hindi)
