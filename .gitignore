@@ -1,8 +1,27 @@
+# Virtual environments
 .venv
 venv
 .venv-backups
+
+# Caches
 .hf_home
 __pycache__
 *.pyc
 .ipynb_checkpoints
+
+# OS files
 .DS_Store
+
+# Generated/temporary files
+*.wav
+*.mp3
+temp_audio_outputs/
+*.log
+
+# Environment
+.env
+
+# Training outputs
+veena_lora_*/
+logs/
+wandb/
