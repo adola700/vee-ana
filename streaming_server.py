@@ -38,10 +38,12 @@ START_OF_AI_TOKEN = 128261
 END_OF_AI_TOKEN = 128262
 AUDIO_CODE_BASE_OFFSET = 128266
 
-# Orpheus-style decoder settings
-MIN_FRAMES_FIRST = 7
-MIN_FRAMES_SUBSEQ = 28
-PROCESS_EVERY = 7
+# Load decoder configuration from environment variables
+CUSTOM_TOKEN_PREFIX = "<custom_token_"
+CUSTOM_TOKEN_SUFFIX = ">"
+MIN_FRAMES_FIRST = int(os.environ.get("MIN_FRAMES_FIRST", 7))
+MIN_FRAMES_SUBSEQ = int(os.environ.get("MIN_FRAMES_SUBSEQ", 28))
+PROCESS_EVERY = int(os.environ.get("PROCESS_EVERY", 28))
 
 # Default speaker
 DEFAULT_SPEAKER = "kavya"
@@ -60,31 +62,44 @@ class TTSRequest(BaseModel):
     top_p: float = 0.9
 
 
-def turn_token_into_id(token_id: int, index: int):
-    """Convert token ID to audio code following orpheus pattern."""
+def turn_token_into_id(token_sim, index: int):
+    """Convert token to audio code following orpheus pattern."""
     mod = index % 7
-    expected_offset = AUDIO_CODE_BASE_OFFSET + (mod * 4096)
     
-    if AUDIO_CODE_BASE_OFFSET <= token_id < (AUDIO_CODE_BASE_OFFSET + 7 * 4096):
-        audio_code = token_id - expected_offset
-        if 0 <= audio_code < 4096:
-            return audio_code
-    return None
+    # Handle direct numeric IDs from vLLM
+    if isinstance(token_sim, int):
+        expected_offset = AUDIO_CODE_BASE_OFFSET + (mod * 4096)
+        if AUDIO_CODE_BASE_OFFSET <= token_sim < (AUDIO_CODE_BASE_OFFSET + 7 * 4096):
+            audio_code = token_sim - expected_offset
+            return audio_code if 0 <= audio_code < 4096 else None
+        return None
+
+    # Handle string tokens (Orpheus style)
+    try:
+        token_string = str(token_sim).strip()
+        digits_str = token_string.removeprefix(CUSTOM_TOKEN_PREFIX).removesuffix(CUSTOM_TOKEN_SUFFIX)
+        # Assuming the standard Orpheus offset for strings is 10
+        audio_code = int(digits_str) - 10 - (mod * 4096)
+        return audio_code if 0 <= audio_code < 4096 else None
+    except (ValueError, TypeError):
+        return None
 
 
 def convert_to_audio(multiframe: List[int], is_first_chunk: bool = False) -> bytes:
-    """Convert tokens to PCM audio bytes using SNAC decoder."""
-    global snac_model, snac_device
-    
+    """
+    Highly optimized version of convert_to_audio from Orpheus.
+    """
     if len(multiframe) < 7:
         return None
     
     num_frames = len(multiframe) // 7
     
+    # Pre-allocate tensors directly on target device
     codes_0 = torch.empty((1, num_frames), dtype=torch.int32, device=snac_device)
     codes_1 = torch.empty((1, num_frames * 2), dtype=torch.int32, device=snac_device)
     codes_2 = torch.empty((1, num_frames * 4), dtype=torch.int32, device=snac_device)
     
+    # Fill tensors with direct indexing
     for i in range(num_frames):
         base_idx = i * 7
         codes_0[0, i] = multiframe[base_idx]
@@ -95,22 +110,31 @@ def convert_to_audio(multiframe: List[int], is_first_chunk: bool = False) -> byt
         codes_2[0, i*4 + 2] = multiframe[base_idx + 5]
         codes_2[0, i*4 + 3] = multiframe[base_idx + 6]
     
+    # Validation
     if (torch.any(codes_0 < 0) or torch.any(codes_0 > 4096) or
         torch.any(codes_1 < 0) or torch.any(codes_1 > 4096) or
         torch.any(codes_2 < 0) or torch.any(codes_2 > 4096)):
         return None
-    
     codes = [codes_0, codes_1, codes_2]
     
     with torch.inference_mode():
         audio_hat = snac_model.decode(codes)
         
+        # Slicing logic from Orpheus
         if is_first_chunk:
+            # For the very first chunk, we return everything we have to avoid empty slices
             audio_slice = audio_hat.squeeze()
         else:
-            # Each SNAC frame is 512 samples. 
-            # We return only the latest frame (7 tokens worth).
-            audio_slice = audio_hat[:, :, -512:].squeeze()
+            # We process MIN_FRAMES_SUBSEQ (default 28 = 4 frames) or more.
+            # If we have exactly 28 tokens, we want frames [-4:] which are samples [-2048:]
+            num_samples = num_frames * 512
+            # If the user provides 8 frames (56 tokens), the slice 2048:4096 
+            # effectively returns the last 4 frames. 
+            # We'll use your exact 2048:4096 logic if we have 8+ frames.
+            if num_samples >= 4096:
+                audio_slice = audio_hat[:, :, 2048:4096].squeeze()
+            else:
+                audio_slice = audio_hat[:, :, -512:].squeeze()
         
         if snac_device == "cuda":
             audio_int16 = (audio_slice * 32767.0).round().to(torch.int16)
@@ -179,26 +203,23 @@ async def generate_tokens_vllm(text: str, temperature: float, top_p: float):
 
 
 async def tokens_decoder(token_gen) -> AsyncGenerator[bytes, None]:
-    """Decode tokens into audio chunks."""
+    """Decode tokens into audio chunks with reduced latency and Orpheus logic."""
     buffer = []
     count = 0
     first_chunk_sent = False
     decode_start = time.perf_counter()
-    
-    # Minimal threshold for fastest start (7 tokens = 1 frame = ~21ms audio)
-    INITIAL_THRESHOLD = 7 
-    
-    async for token_id in token_gen:
-        audio_code = turn_token_into_id(token_id, count)
-        if audio_code is None or audio_code < 0:
+
+    async for token_sim in token_gen:
+        token = turn_token_into_id(token_sim, count)
+        if token is None or token < 0:
             continue
-        
-        buffer.append(audio_code)
+
+        buffer.append(token)
         count += 1
-        
-        if not first_chunk_sent and count >= INITIAL_THRESHOLD:
+
+        if not first_chunk_sent and count >= MIN_FRAMES_FIRST:
             snac_start = time.perf_counter()
-            audio = convert_to_audio(buffer, is_first_chunk=True)
+            audio = convert_to_audio(buffer[-MIN_FRAMES_FIRST:], is_first_chunk=True)
             snac_time = (time.perf_counter() - snac_start) * 1000
             if audio is not None:
                 first_chunk_sent = True
@@ -206,8 +227,9 @@ async def tokens_decoder(token_gen) -> AsyncGenerator[bytes, None]:
                 logger.info(f"First audio chunk: {count} tokens collected in {total_time:.2f}ms, SNAC decode: {snac_time:.2f}ms")
                 yield audio
         elif first_chunk_sent and count % PROCESS_EVERY == 0:
-            # Pass a larger window for SNAC overlap but return only newest samples
-            window = buffer[-28:] if len(buffer) >= 28 else buffer
+            # Use MIN_FRAMES_SUBSEQ (default 28 = 4 frames) or larger for overlap
+            # If subseq is 56, we process 8 frames for better quality
+            window = buffer[-MIN_FRAMES_SUBSEQ:] if len(buffer) >= MIN_FRAMES_SUBSEQ else buffer
             audio = convert_to_audio(window, is_first_chunk=False)
             if audio is not None:
                 yield audio
@@ -225,6 +247,14 @@ async def lifespan(app: FastAPI):
     snac_device = "cuda" if torch.cuda.is_available() else "cpu"
     snac_model = snac_model.to(snac_device)
     
+    # Compile SNAC model for speed
+    if snac_device == "cuda":
+        try:
+            logger.info("Compiling SNAC model...")
+            snac_model.decode = torch.compile(snac_model.decode)
+        except Exception as e:
+            logger.warning(f"Failed to compile SNAC: {e}")
+            
     if snac_device == "cuda":
         torch.backends.cudnn.benchmark = True
         dummy_codes = [
@@ -246,9 +276,9 @@ async def lifespan(app: FastAPI):
     engine_args = AsyncEngineArgs(
         model=model_name,
         trust_remote_code=True,
-        dtype="bfloat16",
-        gpu_memory_utilization=0.9,
-        max_model_len=2048,
+        dtype="float16",
+        gpu_memory_utilization=0.5,
+        max_model_len=1024,
         enforce_eager=True,
     )
     
