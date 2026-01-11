@@ -5,7 +5,7 @@
 
 ## 1. Executive Summary
 
-Veena Hinglish TTS is a state-of-the-art text-to-speech model. Built on top of **Llama 3.2 3B**, the model leverages a speech-language model architecture to generate high-fidelity, natural-sounding audio.
+Veena Hinglish TTS is a state-of-the-art text-to-speech model. Built on top of **Llama 3.2 3B**, it generate discrete audio tokens from text, enabling high-fidelity speech synthesis.
 
 Through fine-tuning on a curated dataset of authentic Hindi speech and generated Hinglish content, we achieved a significant quality improvement, raising the Mean Opinion Score (MOS) from **4.12 (Base)** to **4.66 (Fine-tuned)**.
 
