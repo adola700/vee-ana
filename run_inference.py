@@ -8,7 +8,7 @@ import tqdm
 import argparse
 
 # --- Configuration ---
-OUTPUT_DIR = "generated_audio_stage_2_akhila"
+OUTPUT_DIR = "generated_audio"
 CSV_FILE = "eval_data_25.csv"
 
 # Control token IDs (fixed for Veena)

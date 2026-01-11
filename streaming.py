@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 AUDIO_CODE_BASE_OFFSET = 128266  
 MIN_FRAMES_FIRST = 7   
 PROCESS_EVERY = 7
-# Based on your logs, 1 frame = 2048 samples. We hardcode this to prevent jitter.
 SAMPLES_PER_FRAME = 2048 
 
 llm = None
@@ -58,7 +57,7 @@ def convert_to_audio(multiframe: List[int], is_first_chunk: bool = False) -> byt
             if audio_hat.shape[-1] >= SAMPLES_PER_FRAME:
                 audio_slice = audio_hat[:, :, -SAMPLES_PER_FRAME:].squeeze()
             else:
-                # Fallback if model generates less than expected (rare)
+                # Fallback if model generates less than expected 
                 audio_slice = audio_hat.squeeze()
         
         # Convert to PCM16
