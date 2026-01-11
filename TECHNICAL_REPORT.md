@@ -14,14 +14,14 @@ Through fine-tuning on a curated dataset of authentic Hindi speech and generated
 Veena treats speech synthesis as a language modeling task.
 
 *   **Backbone**: **Llama 3.2 3B** (Fine-tuned).
-*   **Audio Tokenizer**: **SNAC** (24kHz) at 32kbps.
+*   **Audio Tokenizer**: **SNAC** (24kHz).
 *   **Methodology**: The model autoregressively predicts audio tokens based on input text tokens.
     *   **Input**: Text tokens + Speaker Embeddings (`<spk_kavya>`).
     *   **Output**: Discrete audio codes corresponding to SNAC layers.
 
 ## 3. Training Details
 
-The best performing model, `veena-hinglish-stage1`, was trained using parameter-efficient fine-tuning (LoRA) to adapt the Llama 3.2 backbone to Hinglish prosody and pronunciation.
+The best performing model, veena-hinglish-stage1, was trained using parameter-efficient fine-tuning (LoRA) to adapt the Veena model to Hinglish prosody and pronunciation.
 
 ### Hardware & Performance
 *   **GPU Used**: NVIDIA **A100 80GB**
