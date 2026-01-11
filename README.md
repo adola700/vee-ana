@@ -64,6 +64,17 @@ This will create a `generated_audio/` directory containing the .mp3 files.
 
 Refer to `eval_data_25.csv` for evaluation sentences and `generated_audio/` for the generated speech outputs.
 
+### 6. Real-time Streaming
+
+**Step 1: Start Server (GPU Environment)**
+```bash
+python streaming.py
+```
+
+**Step 2: Start Client (Local Machine)**
+```bash
+python streaming_client.py
+```
 ---
 
 ## Main Project Files
@@ -73,7 +84,8 @@ Refer to `eval_data_25.csv` for evaluation sentences and `generated_audio/` for 
 |------|---------|
 | `train.ipynb` | Training notebook for LoRA adapter |
 | `merge_lora.py` | Utility to merge LoRA weights |
-
+| `streaming.py` | FastAPI server for real-time inference |
+| `streaming_client.py` | Streamlit UI for testing audio streaming |
 | `run_inference.py` | Script for offline batch audio generation |
 | `eval_data_25.csv` | Test sentences for evaluation |
 
