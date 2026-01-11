@@ -43,7 +43,7 @@ Merges LoRA weights with base Veena model → `./veena_hinglish_merged/`
 ### 3. Upload to HuggingFace Hub
 
 ```bash
-python upload_model_hf.py --repo-id akh99/veena-hinglish-tts --model-path ./veena_hinglish_merged
+python upload_model_hf.py --repo-id akh99/veena-hinglish-stage1 --model-path ./veena_hinglish_merged
 ```
 
 ### 4. Stream Audio (Real-time Inference)
@@ -65,7 +65,7 @@ Interactive web UI for real-time streaming audio.
 Evaluation on `eval_data_25.csv` using MOS (Mean Opinion Score):
 
 ```bash
-python eval_mos.py --model akh99/veena-hinglish-tts --use-4bit
+python eval_mos.py --model akh99/veena-hinglish-stage1 --use-4bit
 ```
 
 **Note**: Evaluation uses **4-bit quantization** to manage memory while maintaining quality.
@@ -88,6 +88,7 @@ python eval_mos.py --model akh99/veena-hinglish-tts --use-4bit
 |------|-----------|
 | `eval_data_25.csv` | 25 test sentences for MOS evaluation (Hindi-English code-mixed) |
 | `eval_50.ipynb` | Notebook for 50-sample evaluation analysis |
+| `generated_audio/` | Output folder containing final speech MP3s generated from the fine-tuned model on eval_data_25.csv |
 
 ### Utilities
 | File | Purpose |
@@ -100,12 +101,27 @@ python eval_mos.py --model akh99/veena-hinglish-tts --use-4bit
 ## Models & Datasets
 
 - **Base Model**: [maya-research/veena-tts](https://huggingface.co/maya-research/veena-tts)
-- **Fine-tuned Model**: [akh99/veena-hinglish-tts](https://huggingface.co/akh99/veena-hinglish-tts) ⭐
+- **Fine-tuned Model**: [akh99/veena-hinglish-stage1](https://huggingface.co/akh99/veena-hinglish-stage1) ⭐ (Best)
 - **Training Dataset**: [akh99/hinglish-tts-openai](https://huggingface.co/datasets/akh99/hinglish-tts-openai)
 
 ---
 
 ## Extras: Data Sources & Training Details
+
+### Speaker Management
+
+**Important Design Decision**: To preserve the original speaker identity (e.g., "kavya"), during training we ensured that each dataset used a different speaker name based on its source:
+
+- Default speaker across inference scripts: **"kavya"** (Veena base model's default voice)
+- During training: Custom speaker names were assigned per dataset to prevent overwriting the original speaker
+- This prevents the fine-tuned model from modifying or conflicting with the base model's native speaker voices
+
+**Default Speaker Configuration**:
+```python
+speaker = "kavya"  # Default in all inference scripts
+```
+
+When you run inference with `run_inference.py`, `streaming.py`, or evaluation scripts, the output will use the "kavya" voice unless explicitly modified.
 
 ### Data Sources
 
@@ -127,8 +143,8 @@ We created Veena Hinglish TTS using 2 primary data sources:
 
 | Model | Based On | Performance |
 |-------|----------|-------------|
-| **veena-hinglish-tts** ⭐ | Indic TTS → Hinglish | **4.66/5 MOS (Best)** |
-| veena-hinglish | OpenAI-generated Hinglish | Alternative variant |
+| **veena-hinglish-stage1** ⭐ | OpenAI-generated Hinglish | **4.66/5 MOS (Best)** |
+| veena-hinglish-tts | Indic TTS → Hinglish | Alternative variant |
 | hinglish-tts-akhila | Eleven Labs-generated Hinglish | Alternative variant |
 
 **Why the best model outperforms others:**

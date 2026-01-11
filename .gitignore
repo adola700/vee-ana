@@ -13,8 +13,6 @@ __pycache__
 .DS_Store
 
 # Generated/temporary files
-*.wav
-*.mp3
 temp_audio_outputs/
 *.log
 
