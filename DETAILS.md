@@ -36,13 +36,13 @@ We created Veena Hinglish TTS using 2 primary data sources:
 #### **Data Source 1: Generated Hinglish (2000 utterances)**
 -   Mixed Hindi-English code-switching sentences
 -   TTS-generated audio:
-    -   **Eleven Labs V3**: 3rd dataset variant
-    -   **GPT-4 Mini TTS**: 1st dataset variant
+    -   **Eleven Labs V3**: [akh99/hinglish-tts-akhila](https://huggingface.co/datasets/akh99/hinglish-tts-akhila)
+    -   **GPT-4 Mini TTS**: [akh99/hinglish-tts-openai](https://huggingface.co/datasets/akh99/hinglish-tts-openai)
 -   **Quality boost**: Converted English transliterations to actual Hindi script using LLM, improving pronunciation naturalness
 
 #### **Data Source 2: Indic TTS (Hindi corpus) → Hinglish**
--   Large-scale authentic Hindi speech
--   Converted to Hinglish (code-mixed format) to align with real-world usage
+-   **Source**: Obtained from `SPRINGLab/IndicTTS-Hindi`
+-   **Structure**: Hinglish column added to suit our requirements
 -   **Method**: Hinglish column generated using LLM call; other columns taken directly from IndicTTS dataset
 -   Preserves original audio quality while creating code-mixed training data
 
@@ -84,8 +84,8 @@ We created Veena Hinglish TTS using 2 primary data sources:
 | File | Purpose | How to Use |
 |------|---------|-----------|
 | `hinglish_texts.json` | LLM-generated Hinglish transliterations from IndicTTS dataset | Reference for dataset conversion |
-| `hinglish_transliterated.txt` | Hindi→English transliterations from `mixed_code.txt` (preprocessing) | Intermediate output from conversion |
-| `mixed_code.txt` | Original mixed code with Hindi + English words | Input to LLM for transliteration |
+| `hinglish_transliterated.txt` | Devanagari script transliterations from `mixed_code.txt` | Output of conversion (used for TTS training) |
+| `mixed_code.txt` | Original mixed code in Roman script | Input to LLM for transliteration to Devanagari |
 | `process_indictts_hinglish.py` | Processes IndicTTS dataset using the JSON mapping | `python process_indictts_hinglish.py` (Loads dataset, matches Hinglish, uploads to HF) |
 
 ### Audio Generation (Offline Batch Processing)
@@ -100,9 +100,9 @@ We created Veena Hinglish TTS using 2 primary data sources:
 ### Data Transformation Example
 
 ```
-mixed_code.txt (Original)
-└─→ LLM Processing (convert Hindi to English transliteration)
-    └─→ hinglish_transliterated.txt (English transliteration)
+mixed_code.txt (Original Roman Hinglish)
+└─→ LLM Processing (convert Roman to Devanagari script)
+    └─→ hinglish_transliterated.txt (Devanagari Script)
     
 hinglish_texts.json (Indic TTS dataset conversion)
 └─→ LLM Processing (Hindi → Hinglish)
@@ -111,16 +111,16 @@ hinglish_texts.json (Indic TTS dataset conversion)
 
 ### Preprocessing Example
 
-**`mixed_code.txt` (Original)**
-```
-मेरे पास एक dog है।
-आपका name क्या है?
-```
-
-**`hinglish_transliterated.txt` (After transliteration)**
+**`mixed_code.txt` (Original Roman Hinglish)**
 ```
 Mere paas ek dog hai.
 Aapka name kya hai?
+```
+
+**`hinglish_transliterated.txt` (After transliteration to Devanagari)**
+```
+मेरे पास एक dog है।
+आपका name क्या है?
 ```
 
 **`hinglish_texts.json` (Indic TTS → Hinglish conversion)**
