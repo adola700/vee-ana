@@ -85,7 +85,7 @@ python streaming_client.py
 | `train.ipynb` | Training notebook for LoRA adapter |
 | `merge_lora.py` | Utility to merge LoRA weights |
 | `streaming.py` | FastAPI server for real-time inference |
-| `streaming_client.py` | Streamlit UI for testing audio streaming |
+| `streaming_client.py` | Terminal client for testing audio streaming |
 | `run_inference.py` | Script for offline batch audio generation |
 | `eval_data_25.csv` | Test sentences for evaluation |
 
