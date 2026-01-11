@@ -1,4 +1,4 @@
-# Technical Report: Veena Hinglish TTS
+# Technical Report: Veena Hinglish Stage 1
 
 **Date**: January 2026
 **Model Version**: `veena-hinglish-stage1` (Best)
@@ -72,3 +72,8 @@ We conducted subjective Mean Opinion Score (MOS) testing to validate the model's
 **Key Observations**:
 *   The fine-tuned model significantly reduces robotic artifacts in code-mixed sentences.
 *   Pronunciation of English words within Hindi sentences ("Office", "Time", "Market") is more natural.
+
+## 6. Future Improvements
+
+*   **Latency**: Implement **Speculative Decoding** to further reduce TTFB and increase generation speed.
+*   **Accuracy**: Train on **larger datasets** and incorporate **larger-scale synthetic data** with increased compute resources to achieve higher accuracy levels.
