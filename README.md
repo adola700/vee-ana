@@ -60,17 +60,11 @@ Starts FastAPI server with vLLM (uses **bfloat16** for speed).
 ```bash
 streamlit run streaming_client.py
 ```
-Interactive web UI for real-time streaming audio.
+Streamlit client for real-time streaming audio.
 
 ### 5. Evaluate Model
 
-Evaluation on `eval_data_25.csv` using MOS (Mean Opinion Score):
-
-```bash
-python eval_mos.py --model akh99/veena-hinglish-stage1 --use-4bit
-```
-
-**Note**: Evaluation uses **4-bit quantization** to manage memory while maintaining quality.
+Refer to `eval_data_25.csv` for evaluation sentences and `generated_audio/` for the generated speech outputs.
 
 ---
 
@@ -89,7 +83,6 @@ python eval_mos.py --model akh99/veena-hinglish-stage1 --use-4bit
 | File | How to Use |
 |------|-----------|
 | `eval_data_25.csv` | 25 test sentences for MOS evaluation (Hindi-English code-mixed) |
-| `eval_50.ipynb` | Notebook for 50-sample evaluation analysis |
 | `generated_audio/` | Output folder containing final speech MP3s generated from the fine-tuned model on eval_data_25.csv |
 
 ### Utilities
