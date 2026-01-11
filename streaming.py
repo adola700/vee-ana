@@ -25,7 +25,12 @@ snac_device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def turn_token_into_id(token_id: int, index: int):
     mod = index % 7
-    return token_id - (AUDIO_CODE_BASE_OFFSET + (mod * 4096))
+    audio_code = token_id - (AUDIO_CODE_BASE_OFFSET + (mod * 4096))
+    # Validate: audio codes should be 0-4095
+    if 0 <= audio_code < 4096:
+        return audio_code
+    else:
+        return None  # Invalid code - skip it
 
 def convert_to_audio(multiframe: List[int], is_first_chunk: bool = False) -> bytes:
     num_frames = len(multiframe) // 7
@@ -63,7 +68,7 @@ async def generate_tokens_vllm(text: str):
     from vllm import SamplingParams
     prompt = f"<spk_kavya> {text}"
     input_ids = [128259] + tokenizer.encode(prompt, add_special_tokens=False) + [128260, 128261, 128257]
-    params = SamplingParams(temperature=0.4, top_p=0.9, max_tokens=1024, stop_token_ids=[128258, 128262])
+    params = SamplingParams(temperature=0.1, top_p=0.9, max_tokens=1024, stop_token_ids=[128258, 128262])
     request_id = str(uuid.uuid4())
     prev_count = 0
     async for output in llm.generate({"prompt_token_ids": input_ids}, params, request_id):
@@ -76,6 +81,8 @@ async def tokens_decoder(token_gen) -> AsyncGenerator[bytes, None]:
     buffer, count, first_sent = [], 0, False
     async for token_id in token_gen:
         code = turn_token_into_id(token_id, count)
+        if code is None:  # Skip invalid codes
+            continue
         buffer.append(code)
         count += 1
         
@@ -99,8 +106,8 @@ async def lifespan(app: FastAPI):
     global llm, snac_model, tokenizer
     snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval().to(snac_device)
     from vllm import AsyncLLMEngine, AsyncEngineArgs
-    tokenizer = AutoTokenizer.from_pretrained("maya-research/veena-tts")
-    args = AsyncEngineArgs(model="maya-research/veena-tts", dtype="bfloat16", gpu_memory_utilization=0.4, enforce_eager=True)
+    tokenizer = AutoTokenizer.from_pretrained("akh99/veena-hinglish-stage1")
+    args = AsyncEngineArgs(model="akh99/veena-hinglish-stage1", dtype="bfloat16", gpu_memory_utilization=0.4, enforce_eager=True)
     llm = AsyncLLMEngine.from_engine_args(args)
     yield
 
