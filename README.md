@@ -1,6 +1,6 @@
 # Veena Hinglish TTS
 
-Fine-tuned Veena TTS model for Hinglish (Hindi-English code-mixed) speech synthesis.
+Fine-tuned Veena TTS model for Hinglish speech synthesis.
 
 **Performance**: Base model MOS: 4.12/5 → Fine-tuned model: **4.66/5** ⭐
 
