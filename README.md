@@ -26,13 +26,7 @@ OPENAI_API_KEY=your_openai_key  # Optional
 
 ### 1. Train Model
 
-Open and run all cells in the training notebook:
-
-```bash
-jupyter notebook train.ipynb
-```
-
-Alternatively, execute the notebook from command line:
+Execute the training notebook:
 
 ```bash
 jupyter nbconvert --to notebook --execute train.ipynb
