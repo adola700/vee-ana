@@ -48,19 +48,17 @@ Merges LoRA weights with base Veena model → `./veena_hinglish_merged/`
 python upload_model_hf.py --repo-id akh99/veena-hinglish-stage1 --model-path ./veena_hinglish_merged
 ```
 
-### 4. Stream Audio (Real-time Inference)
 
-#### Terminal 1 (GPU environment):
-```bash
-python streaming.py
-```
-Starts FastAPI server with vLLM (uses **bfloat16** for speed).
 
-#### Terminal 2 (Local machine):
+### 4. Running Offline Batch Inference (For Evaluation)
+
+To generate audio files for all sentences in a csv file (like `eval_data_25.csv`) using the fine-tuned model:
+
 ```bash
-streamlit run streaming_client.py
+python run_inference.py --model_name akh99/veena-hinglish-stage1
 ```
-Streamlit client for real-time streaming audio.
+
+This will create a `generated_audio/` directory containing the .mp3 files.
 
 ### 5. Evaluate Model
 
@@ -70,26 +68,17 @@ Refer to `eval_data_25.csv` for evaluation sentences and `generated_audio/` for 
 
 ## Main Project Files
 
-### Core Training & Serving
-| File | How to Use |
-|------|-----------|
-| `train.ipynb` | Open in Jupyter, edit dataset config, run cells to train LoRA adapter |
-| `merge_lora.py` | Run after training to merge LoRA weights with base model |
-| `streaming.py` | Run in GPU environment: `python streaming.py` → FastAPI server on port 8000 |
-| `streaming_client.py` | Run locally: `streamlit run streaming_client.py` → Interactive UI for streaming audio |
-| `upload_model_hf.py` | Upload trained model to HuggingFace Hub after merging |
-
-### Evaluation
-| File | How to Use |
-|------|-----------|
-| `eval_data_25.csv` | 25 test sentences for MOS evaluation (Hindi-English code-mixed) |
-| `generated_audio/` | Output folder containing final speech MP3s generated from the fine-tuned model on eval_data_25.csv |
-
-### Utilities
+### Project Structure
 | File | Purpose |
 |------|---------|
-| `utils.py` | Helper functions (OpenAI TTS API calls, etc.) |
-| `requirements.txt` | All Python dependencies |
+| `train.ipynb` | Training notebook for LoRA adapter |
+| `merge_lora.py` | Utility to merge LoRA weights |
+
+| `run_inference.py` | Script for offline batch audio generation |
+| `eval_data_25.csv` | Test sentences for evaluation |
+
+> [!NOTE]
+> For a detailed breakdown of all data files, preprocessing scripts, and specific audio generation tools, please refer to [DETAILS.md](./DETAILS.md).
 
 ---
 
@@ -97,127 +86,21 @@ Refer to `eval_data_25.csv` for evaluation sentences and `generated_audio/` for 
 
 - **Base Model**: [maya-research/veena-tts](https://huggingface.co/maya-research/veena-tts)
 - **Fine-tuned Model**: [akh99/veena-hinglish-stage1](https://huggingface.co/akh99/veena-hinglish-stage1) ⭐ (Best)
-- **Training Dataset**: [akh99/hinglish-tts-openai](https://huggingface.co/datasets/akh99/hinglish-tts-openai)
+- **Training Dataset**: [akh99/indictts-hinglish](https://huggingface.co/datasets/akh99/indictts-hinglish)
 
 ---
 
-## Extras: Data Sources & Training Details
-
-### Speaker Management
-
-**Important Design Decision**: To preserve the original speaker identity (e.g., "kavya"), during training we ensured that each dataset used a different speaker name based on its source:
-
-- Default speaker across inference scripts: **"kavya"** (Veena base model's default voice)
-- During training: Custom speaker names were assigned per dataset to prevent overwriting the original speaker
-- This prevents the fine-tuned model from modifying or conflicting with the base model's native speaker voices
-
-**Default Speaker Configuration**:
-```python
-speaker = "kavya"  # Default in all inference scripts
-```
-
-When you run inference with `run_inference.py`, `streaming.py`, or evaluation scripts, the output will use the "kavya" voice unless explicitly modified.
-
-### Data Sources
-
-We created Veena Hinglish TTS using 2 primary data sources:
-
-#### **Data Source 1: Generated Hinglish (2000 utterances)**
-- Mixed Hindi-English code-switching sentences
-- TTS-generated audio:
-  - **Eleven Labs V3**: 3rd dataset variant
-  - **GPT-4 Mini TTS**: 1st dataset variant
-- **Quality boost**: Converted English transliterations to actual Hindi script using LLM, improving pronunciation naturalness
-
-#### **Data Source 2: Indic TTS (Hindi corpus) → Hinglish**
-- Large-scale authentic Hindi speech
-- Converted to Hinglish (code-mixed format) to align with real-world usage
-- Preserves original audio quality while creating code-mixed training data
-
-### Best Model Comparison
-
-| Model | Based On | Performance |
-|-------|----------|-------------|
-| **veena-hinglish-stage1** ⭐ | OpenAI-generated Hinglish | **4.66/5 MOS (Best)** |
-| veena-hinglish-tts | Indic TTS → Hinglish | Alternative variant |
-| hinglish-tts-akhila | Eleven Labs-generated Hinglish | Alternative variant |
-
-**Why the best model outperforms others:**
-- Best model: Trained on **authentic Hindi speech** (Indic TTS dataset)
-- Best model: Large-scale dataset converted to Hinglish
-- Other models: Trained on **artificially-generated TTS audio** (OpenAI/Eleven Labs)
-- Other models: **~20x smaller dataset** (only 2000 synthetic utterances vs. large Indic corpus)
-- Result: Superior naturalness and pronunciation quality due to real human speech foundation
-
-**Note**: The best model uses authentic Hindi speech as foundation, resulting in superior quality compared to models trained on synthetic TTS data.
-
-### Evaluation Results
-
-**MOS (Mean Opinion Score) on eval_data_25.csv**:
-- Base Veena model: **4.12/5**
-- Fine-tuned Hinglish model: **4.66/5** ⭐
-- **Improvement**: +0.54 points (+13% relative improvement)
-
-**Technical Notes**:
-- **Streaming**: Uses bfloat16 precision (faster inference with minimal quality loss)
-- **Evaluation**: Uses 4-bit quantization (memory efficient for MOS scoring)
-- **Evaluation methodology**: Subjective quality assessment with efforts to minimize bias
-
 ---
 
-## Extras: Data Files & Audio Generation
+## Technical Details
 
-### Data & Preprocessing Files
+For in-depth information on:
+*   **Data Sources**: (Generated Hinglish vs Indic TTS)
+*   **Speaker Management**: (Preserving "kavya" voice)
+*   **Model Comparisons**: (Performance benchmarks)
+*   **Dataset Processing**: (Hinglish conversion workflows)
 
-| File | Purpose | How to Use |
-|------|---------|-----------|
-| `hinglish_texts.json` | LLM-generated Hinglish transliterations from Indic TTS dataset | Reference for dataset conversion |
-| `hinglish_transliterated.txt` | Hindi→English transliterations from `mixed_code.txt` (preprocessing) | Intermediate output from conversion |
-| `mixed_code.txt` | Original mixed code with Hindi + English words | Input to LLM for transliteration |
-
-### Audio Generation (Offline Batch Processing)
-
-| File | Purpose | How to Use |
-|------|---------|-----------|
-| `generate_audio_batch_veena.py` | Generate audio in batch using Veena model | Edit config, run to generate multiple audio files |
-| `generate_11_labs.py` | Generate audio using Eleven Labs TTS API | Setup API key, run for batch generation |
-| `generate_openai.py` | Generate audio using OpenAI TTS mini model | Setup API key in `utils.py`, run for batch |
-| `batch_generate_audio.py` | Batch processing utility for any TTS | Configure input CSV and run for large-scale generation |
-
-### Data Transformation Example
-
-```
-mixed_code.txt (Original)
-└─→ LLM Processing (convert Hindi to English transliteration)
-    └─→ hinglish_transliterated.txt (English transliteration)
-    
-hinglish_texts.json (Indic TTS dataset conversion)
-└─→ LLM Processing (Hindi → Hinglish)
-    └─→ training data for models
-```
-
-### Preprocessing Example
-
-**`mixed_code.txt` (Original)**
-```
-मेरे पास एक dog है।
-आपका name क्या है?
-```
-
-**`hinglish_transliterated.txt` (After transliteration)**
-```
-Mere paas ek dog hai.
-Aapka name kya hai?
-```
-
-**`hinglish_texts.json` (Indic TTS → Hinglish conversion)**
-```json
-{
-  "hindi_text": "नमस्ते, आप कैसे हैं?",
-  "hinglish_text": "Namaste, aap kaise ho?",
-  "source": "indic_tts_dataset"
-}
-```
+👉 **Please see [DETAILS.md](./DETAILS.md)**
 
 ---
 
