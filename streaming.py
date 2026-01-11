@@ -1,30 +1,23 @@
 import os
-# Force vLLM v0 engine architecture
 os.environ["VLLM_USE_V1"] = "0"
-import time
-import logging
-import asyncio
-import uuid
-import torch
+import time, logging, asyncio, uuid, torch
 import numpy as np
 from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
 from snac import SNAC
 from transformers import AutoTokenizer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Configuration & Offsets ---
+# --- CONFIGURATION ---
 AUDIO_CODE_BASE_OFFSET = 128266  
-MIN_FRAMES_FIRST = 7     # Wait for 1 frame (7 tokens) before starting
-PROCESS_EVERY = 7        # Process every 1 frame (stride)
-CONTEXT_WINDOW = 28      # Keep last 4 frames (28 tokens) for context
+MIN_FRAMES_FIRST = 7   
+PROCESS_EVERY = 7
+# Based on your logs, 1 frame = 2048 samples. We hardcode this to prevent jitter.
+SAMPLES_PER_FRAME = 2048 
 
-# Globals
 llm = None
 tokenizer = None
 snac_model = None
@@ -32,16 +25,12 @@ snac_device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def turn_token_into_id(token_id: int, index: int):
     mod = index % 7
-    expected_offset = AUDIO_CODE_BASE_OFFSET + (mod * 4096)
-    audio_code = token_id - expected_offset
-    return audio_code if 0 <= audio_code < 4096 else None
+    return token_id - (AUDIO_CODE_BASE_OFFSET + (mod * 4096))
 
 def convert_to_audio(multiframe: List[int], is_first_chunk: bool = False) -> bytes:
-    # 1. Determine dimensions
     num_frames = len(multiframe) // 7
     if num_frames == 0: return None
 
-    # 2. Prepare Tensors
     codes_0 = torch.empty((1, num_frames), dtype=torch.int32, device=snac_device)
     codes_1 = torch.empty((1, num_frames * 2), dtype=torch.int32, device=snac_device)
     codes_2 = torch.empty((1, num_frames * 4), dtype=torch.int32, device=snac_device)
@@ -55,28 +44,20 @@ def convert_to_audio(multiframe: List[int], is_first_chunk: bool = False) -> byt
     with torch.inference_mode():
         audio_hat = snac_model.decode([codes_0, codes_1, codes_2])
         
-        # --- THE FIX: DYNAMIC SLICING ---
-        total_samples = audio_hat.shape[-1]
-        
         if is_first_chunk:
-            # Send everything we have
+            # Send full buffer for the first chunk
             audio_slice = audio_hat.squeeze()
-            logger.info(f">> First Chunk: {total_samples} samples")
         else:
-            # We stepped forward by 1 frame (PROCESS_EVERY=7).
-            # We must output exactly 1 frame worth of audio.
-            # Calculate samples per frame (e.g., 8192 / 4 = 2048)
-            samples_per_frame = total_samples // num_frames
-            
-            # Slice the NEWEST samples
-            audio_slice = audio_hat[:, :, -samples_per_frame:].squeeze()
-            
-            # Debug log to confirm fix
-            # logger.info(f">> Subseq Chunk: {audio_slice.shape[0]} samples (Calculated slice)")
-
+            # FIX: Always take exactly the newest 2048 samples
+            # This aligns perfectly with the 7-token stride
+            if audio_hat.shape[-1] >= SAMPLES_PER_FRAME:
+                audio_slice = audio_hat[:, :, -SAMPLES_PER_FRAME:].squeeze()
+            else:
+                # Fallback if model generates less than expected (rare)
+                audio_slice = audio_hat.squeeze()
+        
         # Convert to PCM16
-        audio_int16 = (audio_slice * 32767.0).clamp(-32768, 32767).round().to(torch.int16)
-        return audio_int16.cpu().numpy().tobytes()
+        return (audio_slice * 32767.0).clamp(-32768, 32767).round().to(torch.int16).cpu().numpy().tobytes()
 
 async def generate_tokens_vllm(text: str):
     from vllm import SamplingParams
@@ -95,25 +76,23 @@ async def tokens_decoder(token_gen) -> AsyncGenerator[bytes, None]:
     buffer, count, first_sent = [], 0, False
     async for token_id in token_gen:
         code = turn_token_into_id(token_id, count)
-        if code is None: continue
         buffer.append(code)
         count += 1
         
-        # Trigger on first frame
         if not first_sent and count >= MIN_FRAMES_FIRST:
             audio = convert_to_audio(buffer, is_first_chunk=True)
             if audio:
                 first_sent = True
                 yield audio
-                await asyncio.sleep(0.001) # Force Flush
+                await asyncio.sleep(0.001)
         
-        # Trigger on subsequent frames (every 7 tokens)
         elif first_sent and count % PROCESS_EVERY == 0:
-            window = buffer[-CONTEXT_WINDOW:] # Use sliding window for context
+            # Sliding window: Keep last 28 tokens (4 frames) for context
+            window = buffer[-28:] 
             audio = convert_to_audio(window, is_first_chunk=False)
             if audio:
                 yield audio
-                await asyncio.sleep(0.001) # Force Flush
+                await asyncio.sleep(0.001)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -121,12 +100,7 @@ async def lifespan(app: FastAPI):
     snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval().to(snac_device)
     from vllm import AsyncLLMEngine, AsyncEngineArgs
     tokenizer = AutoTokenizer.from_pretrained("maya-research/veena-tts")
-    args = AsyncEngineArgs(
-        model="maya-research/veena-tts", 
-        dtype="bfloat16", 
-        gpu_memory_utilization=0.4, 
-        enforce_eager=True
-    )
+    args = AsyncEngineArgs(model="maya-research/veena-tts", dtype="bfloat16", gpu_memory_utilization=0.4, enforce_eager=True)
     llm = AsyncLLMEngine.from_engine_args(args)
     yield
 
@@ -140,8 +114,7 @@ async def tts_ws(ws: WebSocket):
             data = await ws.receive_json()
             async for chunk in tokens_decoder(generate_tokens_vllm(data.get("text"))):
                 await ws.send_bytes(chunk)
-                # CRITICAL: Sleep allows the loop to send the packet immediately
-                await asyncio.sleep(0.001)
+                await asyncio.sleep(0.001) # Critical for streaming fluidity
             await ws.send_json({"type": "end"})
     except WebSocketDisconnect: pass
 
