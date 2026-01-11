@@ -44,15 +44,15 @@ We created Veena Hinglish TTS using 2 primary data sources:
 -   **Source**: Obtained from `SPRINGLab/IndicTTS-Hindi`
 -   **Structure**: Hinglish column added to suit our requirements
 -   **Method**: Hinglish column generated using LLM call; other columns taken directly from IndicTTS dataset
--   Preserves original audio quality while creating code-mixed training data
+
 
 ### Best Model Comparison
 
 | Model | Based On | Performance |
 |-------|----------|-------------|
 | **veena-hinglish-stage1** ⭐ | Indic TTS → Hinglish | **4.66/5 MOS (Best)** |
-| veena-hinglish-tts | Indic TTS → Hinglish | Alternative variant |
-| hinglish-tts-akhila | Eleven Labs-generated Hinglish | Alternative variant |
+| veena-hinglish-tts | openai dataset - akh99/hinglish-tts-openai | Alternative variant |
+| hinglish-tts-akhila | Eleven Labs V3: akh99/hinglish-tts-akhila | Alternative variant |
 
 **Why the best model outperforms others:**
 -   Best model: Trained on **authentic Hindi speech** (Indic TTS dataset)
@@ -72,7 +72,7 @@ We created Veena Hinglish TTS using 2 primary data sources:
 
 **Technical Notes**:
 
--   **Evaluation**: Uses 4-bit quantization (memory efficient for MOS scoring)
+
 -   **Evaluation methodology**: Subjective quality assessment with efforts to minimize bias
 
 ---
