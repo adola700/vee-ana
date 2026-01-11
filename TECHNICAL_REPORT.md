@@ -5,7 +5,7 @@
 
 ## 1. Executive Summary
 
-Veena Hinglish TTS is a state-of-the-art text-to-speech model designed specifically for Hindi-English code-switched (Hinglish) speech. Built on top of **Llama 3.2 3B**, the model leverages a speech-language model (SLM) architecture to generate high-fidelity, natural-sounding audio.
+Veena Hinglish TTS is a state-of-the-art text-to-speech model. Built on top of **Llama 3.2 3B**, the model leverages a speech-language model (SLM) architecture to generate high-fidelity, natural-sounding audio.
 
 Through fine-tuning on a curated dataset of authentic Hindi speech and generated Hinglish content, we achieved a significant quality improvement, raising the Mean Opinion Score (MOS) from **4.12 (Base)** to **4.66 (Fine-tuned)**.
 
@@ -39,7 +39,7 @@ We utilized **LoRA (Low-Rank Adaptation)** to train efficiently with minimal VRA
 | **Target Modules** | All Linear | `q`, `k`, `v`, `o`, `gate`, `up`, `down` |
 | **Optimizer** | `adamw_8bit` | Memory efficency |
 | **Learning Rate** | `1e-4` | Cosine scheduler with 2% warmup |
-| **Batch Size** | 24 | Per device micro-batch 6 * Grad Accum 4 |
+| **Batch Size** | 24 | Effective: 24 (6 micro-batch × 4 accum steps) |
 | **Dropout** | 0.05 | To prevent overfitting on small datasets |
 
 ## 4. Inference & Real-time Streaming
@@ -47,12 +47,13 @@ We utilized **LoRA (Low-Rank Adaptation)** to train efficiently with minimal VRA
 Inference is optimized for both offline batch generation and low-latency real-time streaming.
 
 ### Streaming Architecture
-*   **Hardware**: NVIDIA **H100** (Hopper) used for streaming benchmarks.
+*   **Hardware**: NVIDIA **H100** (Hopper) - Used specifically for streaming benchmarks.
 *   **Engine**: **vLLM** (AsyncLLMEngine).
 *   **Precision**: `bfloat16`.
 *   **Logic**:
     *   **Sliding Window**: Uses a 7-token stride with a window of 28 tokens (4 frames) to maintain audio coherence across chunks.
     *   **Latency**: First chunk emitted after just 7 tokens generated.
+    *   **Performance**: TTFB (Time to First Byte) ~80ms on H100.
 
 ### Optimizations
 *   **vLLM Integration**: High-throughput serving layout.
