@@ -26,11 +26,19 @@ OPENAI_API_KEY=your_openai_key  # Optional
 
 ### 1. Train Model
 
+Open and run all cells in the training notebook:
+
 ```bash
 jupyter notebook train.ipynb
 ```
 
-Trains a LoRA adapter on Hinglish dataset using HuggingFace datasets.
+Alternatively, execute the notebook from command line:
+
+```bash
+jupyter nbconvert --to notebook --execute train.ipynb
+```
+
+This trains a LoRA adapter on the Hinglish dataset.
 
 ### 2. Merge Adapter
 
