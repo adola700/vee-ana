@@ -6,6 +6,10 @@ import numpy as np
 from collections import deque
 import time
 import logging
+import wave
+
+# DEBUG: Save full audio to file for analysis
+DEBUG_SAVE_AUDIO = True
 
 
 logging.basicConfig(level=logging.INFO)
@@ -39,7 +43,12 @@ async def local_stream():
                 buffered_samples = 0
                 buffer_ready = asyncio.Event()
                 
-                # Receive all chunks first\n                async def receive_chunks():\n                    nonlocal receiving, buffered_samples
+                # DEBUG: Collect all chunks for saving
+                all_audio_chunks = [] if DEBUG_SAVE_AUDIO else None
+                
+                # Receive all chunks first
+                async def receive_chunks():
+                    nonlocal receiving, buffered_samples
                     chunk_count = 0
                     last_chunk_time = time.perf_counter()
                     start_time = last_chunk_time
@@ -79,6 +88,10 @@ async def local_stream():
 
                             audio_queue.append(audio_data)
                             buffered_samples += samples
+                            
+                            # DEBUG: Store chunk for saving
+                            if DEBUG_SAVE_AUDIO:
+                                all_audio_chunks.append(audio_data)
                             chunk_count += 1
                             
                             # Signal buffer ready once we have enough
@@ -130,6 +143,17 @@ async def local_stream():
                 
                 print("\r[SYSTEM]: Playback complete.")
                 await receive_task
+                
+                # DEBUG: Save concatenated audio to WAV file
+                if DEBUG_SAVE_AUDIO and all_audio_chunks:
+                    full_audio = np.concatenate(all_audio_chunks)
+                    filename = f"debug_audio_{int(time.time())}.wav"
+                    with wave.open(filename, 'wb') as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)  # 16-bit
+                        wf.setframerate(TARGET_RATE)
+                        wf.writeframes(full_audio.tobytes())
+                    print(f"[DEBUG]: Saved {len(full_audio)} samples to {filename}")
     
     except Exception as e:
         print(f"\n[ERROR]: {e}")

@@ -144,8 +144,8 @@ def main(model_name="maya-research/veena-tts"):
     for row in tqdm.tqdm(rows):
         idx = row['ID']
         category = row.get('Category', 'Unknown')
-        sentence = """Bhai, city ki fast life mein sapne chase karna padta hai full speed se. Subah uthke coffee piyo, laptop kholo aur code likho jaise boss.Traffic jam mein bhi mind mein ideas ka traffic chal raha hota hai nonstop. Friends bolte hain "yaar, chill kar le," but hustle hi life hai ab.Weekend pe gym jaake body banao, phir Netflix binge for recharge.Paise kamane ka plan solid hai, investments smartly karo long term.Family ko proud feel karwao, success ki story ban jao legend.End mein, dil se dil tak, keep grinding bro, sky's the limit!"""
-        
+        # sentence = """Bhai, city ki fast life mein sapne chase karna padta hai full speed se. Subah uthke coffee piyo, laptop kholo aur code likho jaise boss.Traffic jam mein bhi mind mein ideas ka traffic chal raha hota hai nonstop. Friends bolte hain "yaar, chill kar le," but hustle hi life hai ab.Weekend pe gym jaake body banao, phir Netflix binge for recharge.Paise kamane ka plan solid hai, investments smartly karo long term.Family ko proud feel karwao, success ki story ban jao legend.End mein, dil se dil tak, keep grinding bro, sky's the limit!"""
+        sentence = "Doctor ne kaha hai ki junk food avoid karo for at least a week"
         # Determine unique filename
         filename = f"{idx}_{category.replace(' ', '_')}.mp3"
         output_path = os.path.join(OUTPUT_DIR, filename)
