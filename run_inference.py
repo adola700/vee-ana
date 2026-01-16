@@ -8,7 +8,7 @@ import tqdm
 import argparse
 
 # --- Configuration ---
-OUTPUT_DIR = "generated_audio_old_model"
+OUTPUT_DIR = "generated_audio_new_model"
 CSV_FILE = "eval_data_4.csv"
 
 # Control token IDs (fixed for Veena)
