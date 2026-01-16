@@ -8,8 +8,8 @@ import tqdm
 import argparse
 
 # --- Configuration ---
-OUTPUT_DIR = "generated_audio"
-CSV_FILE = "eval_data_25.csv"
+OUTPUT_DIR = "generated_audio_old_model"
+CSV_FILE = "eval_data_4.csv"
 
 # Control token IDs (fixed for Veena)
 START_OF_SPEECH_TOKEN = 128257
@@ -144,7 +144,7 @@ def main(model_name="maya-research/veena-tts"):
     for row in tqdm.tqdm(rows):
         idx = row['ID']
         category = row.get('Category', 'Unknown')
-        sentence = row['Sentence']
+        sentence = """Bhai, city ki fast life mein sapne chase karna padta hai full speed se. Subah uthke coffee piyo, laptop kholo aur code likho jaise boss.Traffic jam mein bhi mind mein ideas ka traffic chal raha hota hai nonstop. Friends bolte hain "yaar, chill kar le," but hustle hi life hai ab.Weekend pe gym jaake body banao, phir Netflix binge for recharge.Paise kamane ka plan solid hai, investments smartly karo long term.Family ko proud feel karwao, success ki story ban jao legend.End mein, dil se dil tak, keep grinding bro, sky's the limit!"""
         
         # Determine unique filename
         filename = f"{idx}_{category.replace(' ', '_')}.mp3"
