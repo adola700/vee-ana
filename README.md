@@ -12,6 +12,9 @@ Fine-tuned Veena TTS model for Hinglish speech synthesis.
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+sudo apt update
+sudo apt install portaudio19-dev python3-dev
+pip install pyaudio
 ```
 
 Set up API keys in `.env`:
