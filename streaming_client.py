@@ -5,6 +5,11 @@ import pyaudio
 import numpy as np
 from collections import deque
 import time
+import logging
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Install: pip install pyaudio websockets numpy
 WS_URL = "ws://localhost:8000/v1/audio/speech/stream/ws"
@@ -56,6 +61,7 @@ async def local_stream():
                     # Wait for next chunk to be available
                     while chunk_idx >= len(chunks) and receiving:
                         await asyncio.sleep(0.05)  # Wait 50ms for next chunk
+                        # logger.info("Waiting for chunks...RTF > 1")
                     
                     if chunk_idx < len(chunks):
                         audio_chunk = chunks[chunk_idx]
@@ -71,7 +77,7 @@ async def local_stream():
                         if not receiving:
                             break
                 
-                print("\r[SYSTEM]: Playback complete.                    ")
+                print("\r[SYSTEM]: Playback complete.")
                 await receive_task
     
     except Exception as e:

@@ -16,6 +16,7 @@ AUDIO_CODE_BASE_OFFSET = 128266
 MIN_FRAMES_FIRST = 7   
 PROCESS_EVERY = 7
 SAMPLES_PER_FRAME = 2048 
+SAMPLE_RATE = 24000
 
 llm = None
 tokenizer = None
@@ -111,18 +112,63 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
-
 @app.websocket("/v1/audio/speech/stream/ws")
 async def tts_ws(ws: WebSocket):
     await ws.accept()
     try:
         while True:
             data = await ws.receive_json()
-            async for chunk in tokens_decoder(generate_tokens_vllm(data.get("text"))):
+            text = data.get("text")
+            last_chunk_time = time.perf_counter()
+            total_samples = 0
+            start_time = last_chunk_time
+
+            async for chunk in tokens_decoder(
+                generate_tokens_vllm(text)
+            ):
+                now = time.perf_counter()
+
+                # ---- INSTANTANEOUS RTF ----
+                wall_dt = now - last_chunk_time
+
+                samples = len(chunk) // 2
+                audio_dt = samples / SAMPLE_RATE
+
+                inst_rtf = (
+                    wall_dt / audio_dt
+                    if audio_dt > 0 else float("inf")
+                )
+
+                logger.info(
+                    f"inst_RTF={inst_rtf:.2f} | "
+                    f"chunk_audio={audio_dt*1000:.1f}ms | "
+                    f"wall={wall_dt*1000:.1f}ms"
+                )
+
+                last_chunk_time = now
+                total_samples += samples
+
                 await ws.send_bytes(chunk)
-                await asyncio.sleep(0.001) # Critical for streaming fluidity
-            await ws.send_json({"type": "end"})
-    except WebSocketDisconnect: pass
+                await asyncio.sleep(0.001)
+
+            # ---- AVERAGE RTF ----
+            elapsed = time.perf_counter() - start_time
+            audio_seconds = total_samples / SAMPLE_RATE
+            avg_rtf = elapsed / audio_seconds if audio_seconds > 0 else float("inf")
+
+            logger.info(
+                f"AVG_RTF={avg_rtf:.3f} | "
+                f"audio={audio_seconds:.2f}s | wall={elapsed:.2f}s"
+            )
+
+            await ws.send_json({
+                "type": "end",
+                "avg_rtf": round(avg_rtf, 3),
+            })
+
+    except WebSocketDisconnect:
+        pass
+
 
 if __name__ == "__main__":
     import uvicorn
