@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION ---
 AUDIO_CODE_BASE_OFFSET = 128266  
-MIN_FRAMES_FIRST = 7*2   
-PROCESS_EVERY = 7*2
+MIN_FRAMES_FIRST = 7*4   # CHANGED: Wait for 4 frames (28 tokens) before starting
+PROCESS_EVERY = 7        # CHANGED: Process every 1 frame (7 tokens) thereafter
 SAMPLES_PER_FRAME = 2048*2 
 SAMPLE_RATE = 24000
 
@@ -49,19 +49,15 @@ def convert_to_audio(multiframe: List[int], is_first_chunk: bool = False) -> byt
     with torch.inference_mode():
         audio_hat = snac_model.decode([codes_0, codes_1, codes_2])
         
+        # --- CHANGED: Sliding Window Slicing Logic ---
         if is_first_chunk:
-            # Send full buffer for the first chunk
-            audio_slice = audio_hat.squeeze()
+            # First chunk: Return the first ~2 frames (4096 samples)
+            audio_slice = audio_hat[:, :, :4096].squeeze()
         else:
-            # FIX: Always take exactly the newest 2048 samples
-            # This aligns perfectly with the 7-token stride
-            if audio_hat.shape[-1] >= SAMPLES_PER_FRAME:
-                audio_slice = audio_hat[:, :, -SAMPLES_PER_FRAME:].squeeze()
-            else:
-                # Fallback if model generates less than expected 
-                audio_slice = audio_hat.squeeze()
+            # Steady state: Always take the "middle" stable slice (samples 2048 to 4096)
+            # This corresponds to the 2nd frame in the 4-frame window
+            audio_slice = audio_hat[:, :, 2048:4096].squeeze()
         
-        # Convert to PCM16
         return (audio_slice * 32767.0).clamp(-32768, 32767).round().to(torch.int16).cpu().numpy().tobytes()
 
 async def generate_tokens_vllm(text: str):
@@ -81,7 +77,7 @@ async def tokens_decoder(token_gen) -> AsyncGenerator[bytes, None]:
     buffer, count, first_sent = [], 0, False
     async for token_id in token_gen:
         code = turn_token_into_id(token_id, count)
-        if code is None:  # Skip invalid codes
+        if code is None: 
             continue
         buffer.append(code)
         count += 1
@@ -95,6 +91,7 @@ async def tokens_decoder(token_gen) -> AsyncGenerator[bytes, None]:
         
         elif first_sent and count % PROCESS_EVERY == 0:
             # Sliding window: Keep last 28 tokens (4 frames) for context
+            # This logic works automatically with the new PROCESS_EVERY=7
             window = buffer[-28:] 
             audio = convert_to_audio(window, is_first_chunk=False)
             if audio:
@@ -107,7 +104,7 @@ async def lifespan(app: FastAPI):
     snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval().to(snac_device)
     from vllm import AsyncLLMEngine, AsyncEngineArgs
     tokenizer = AutoTokenizer.from_pretrained("akh99/veena-hinglish-stage1")
-    args = AsyncEngineArgs(model="akh99/veena-hinglish-stage1", dtype="bfloat16", gpu_memory_utilization=0.4, enforce_eager=True)
+    args = AsyncEngineArgs(model="akh99/veena-hinglish-stage1", dtype="bfloat16", gpu_memory_utilization=0.8, enforce_eager=True, max_model_len= 2048)
     llm = AsyncLLMEngine.from_engine_args(args)
     yield
 
