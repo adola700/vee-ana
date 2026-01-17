@@ -7,6 +7,7 @@ from collections import deque
 import time
 import logging
 import wave
+import sys
 
 # DEBUG: Save full audio to file for analysis
 DEBUG_SAVE_AUDIO = True
@@ -18,8 +19,7 @@ logger = logging.getLogger(__name__)
 # Install: pip install pyaudio websockets numpy
 WS_URL = "ws://localhost:8000/v1/audio/speech/stream/ws"
 TARGET_RATE = 24000  # Model output - match this exactly
-BUFFER_MS = 300  # Initial buffer before playback starts
-JITTER_BUFFER_SIZE = 10  # Keep N chunks ahead in sliding window
+BUFFER_MS = 400  # Initial buffer before playback starts
 
 async def local_stream():
     p = pyaudio.PyAudio()
@@ -38,7 +38,7 @@ async def local_stream():
                 await ws.send(json.dumps({"text": text}))
                 print("[SYSTEM]: Starting playback...", end="", flush=True)
                 
-                audio_queue = deque(maxlen=JITTER_BUFFER_SIZE)
+                audio_queue = deque() # Remove maxlen to prevent dropped chunks
                 receiving = True
                 buffered_samples = 0
                 buffer_ready = asyncio.Event()
@@ -126,6 +126,7 @@ async def local_stream():
                     # Wait for chunk in queue
                     while len(audio_queue) == 0 and receiving:
                         await asyncio.sleep(0.01)  # Poll quickly
+                        # logger.info("\n\nwaiting for buffer...") 
                     
                     if len(audio_queue) > 0:
                         audio_chunk = audio_queue.popleft()
@@ -144,7 +145,6 @@ async def local_stream():
                 print("\r[SYSTEM]: Playback complete.")
                 await receive_task
                 
-                # DEBUG: Save concatenated audio to WAV file
                 if DEBUG_SAVE_AUDIO and all_audio_chunks:
                     full_audio = np.concatenate(all_audio_chunks)
                     filename = f"debug_audio_{int(time.time())}.wav"

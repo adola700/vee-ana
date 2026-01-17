@@ -54,7 +54,7 @@ def convert_to_audio(multiframe: List[int], is_first_chunk: bool = False) -> byt
             # First chunk: Return the first ~2 frames (4096 samples)
             audio_slice = audio_hat[:, :, :4096].squeeze()
         else:
-            # Steady state: Always take the "middle" stable slice (samples 2048 to 4096)
+            # Steady state: Always take the - middle stable slice (samples 2048 to 4096)
             # This corresponds to the 2nd frame in the 4-frame window
             audio_slice = audio_hat[:, :, 2048:4096].squeeze()
         
